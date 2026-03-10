@@ -8270,147 +8270,227 @@ window.setEntFilter = setEntFilter;
 function initEntityList() { renderEntityList(); }
 
 function renderEntityList() {
-  const body = document.getElementById('ent-list-body');
-  const countEl = document.getElementById('ent-count');
+  const body = document.querySelector('[ident-list-body]');
+  const countEl = document.querySelector('[ident-count]');
   if (!body) return;
 
-  const q = (document.getElementById('ent-search')?.value || '').toLowerCase();
-  const sort = document.getElementById('ent-sort')?.value || 'default';
+  const q = (document.querySelector('[ident-search]')?.value || '').trim().toLowerCase();
+  const sort = document.querySelector('[ident-sort]')?.value || 'default';
 
-  // Build unified entity list
   let entities = [];
 
+  // ───────── Flights ─────────
   if (entFilter === 'all' || entFilter === 'flights') {
-    flights.forEach(f => entities.push({
-      _type: 'flight', _id: f.id,
-      icon: f.type === 'military' ? '✈' : f.type === 'uav' ? '◎' : '✈',
-      iconCol: f.type === 'military' ? '#ff6d00' : f.type === 'uav' ? '#00e5ff' : 'rgba(220,240,255,.8)',
-      name: f.cs || 'Unknown',
-      sub: f.airline || '—',
-      badge: f.type === 'military' ? 'MIL' : f.type === 'helicopter' ? 'HELO' : 'AC',
-      badgeCol: f.type === 'military' ? '#ff6d00' : f.type === 'uav' ? '#00e5ff' : 'rgba(180,200,255,.5)',
-      detail: `Alt: ${(f.alt||0).toLocaleString()}ft  ·  ${f.spd||0} km/h`,
-      sev: f.type === 'military' ? 2 : 0,
-      speed: f.spd || 0,
-      lat: f.livePos?.lat || f.fromLat, lng: f.livePos?.lng || f.fromLng,
-    }));
+    entities = entities.concat(
+      flights.map(f => {
+        // Safe coordinate extraction with type validation
+        const lat = (f.livePos?.lat !== undefined && typeof f.livePos.lat === 'number') 
+          ? f.livePos.lat 
+          : (typeof f.fromLat === 'number' ? f.fromLat : null);
+        const lng = (f.livePos?.lng !== undefined && typeof f.livePos.lng === 'number') 
+          ? f.livePos.lng 
+          : (typeof f.fromLng === 'number' ? f.fromLng : null);
+
+        return {
+          type: 'flights',
+          id: f.id,
+          name: f.callsign || f.reg || 'Unknown flight',
+          sub: `${f.from || 'Unknown'} → ${f.to || 'Unknown'}`,
+          sev: f.sev || 'Low',
+          speed: f.speed || 0,
+          lat: lat,
+          lng: lng,
+          badge: f.type === 'military' ? 'MIL' :
+                 f.type === 'uav' ? 'UAV' :
+                 f.type === 'helicopter' ? 'HELO' : 'CIV',
+          badgeCol: f.type === 'military' ? 'ff6d00' :
+                    f.type === 'uav' ? '00ffb3' :
+                    f.type === 'helicopter' ? '00ff88' : 'e0f2fe'
+        };
+      })
+    );
   }
 
+  // ───────── Vessels ─────────
   if (entFilter === 'all' || entFilter === 'vessels') {
-    vessels.forEach(v => entities.push({
-      _type: 'vessel', _id: v.id,
-      icon: '▲',
-      iconCol: v.type === 'warship' ? '#ff1744' : '#2979ff',
-      name: v.name || 'Unknown',
-      sub: `${v.type}  ·  Flag: ${v.flag}`,
-      badge: v.status === 'anchored' ? 'ANCHOR' : 'ACTIVE',
-      badgeCol: v.status === 'anchored' ? 'rgba(255,255,255,.3)' : '#00ff88',
-      detail: `${v.speed} kt  ·  ${v.chokepoint || v.notes?.split('·')[0]?.trim() || '—'}`,
-      sev: v.type === 'warship' ? 2 : 0,
-      speed: parseFloat(v.speed) || 0,
-      lat: v.lat, lng: v.lng,
-    }));
+    entities = entities.concat(
+      vessels.map(v => {
+        const lat = (typeof v.lat === 'number') ? v.lat : null;
+        const lng = (typeof v.lng === 'number') ? v.lng : null;
+
+        return {
+          type: 'vessels',
+          id: v.id,
+          name: v.name || 'Unknown vessel',
+          sub: `${v.flag || 'Unknown flag'} · ${v.type || 'Vessel'}`,
+          sev: v.sev || 'Low',
+          speed: v.speed || 0,
+          lat: lat,
+          lng: lng,
+          badge: v.alert ? 'ALERT' : (v.type || 'VSL').toUpperCase().slice(0,4),
+          badgeCol: v.alert ? 'ff1744' : '2979ff'
+        };
+      })
+    );
   }
 
+  // ───────── Conflicts ─────────
   if (entFilter === 'all' || entFilter === 'conflicts') {
-    CONFLICTS.forEach(c => entities.push({
-      _type: 'conflict', _id: c.id,
-      icon: '●',
-      iconCol: c.sev === 'Critical' ? '#f43f5e' : c.sev === 'High' ? '#fb923c' : '#fbbf24',
-      name: c.region || 'Unknown',
-      sub: c.type || 'Armed conflict',
-      badge: c.sev,
-      badgeCol: c.sev === 'Critical' ? '#f43f5e' : c.sev === 'High' ? '#fb923c' : '#fbbf24',
-      detail: `${c.src || 'GDELT'}  ·  Conf: ${c.conf}  ·  ${c.age}h ago`,
-      sev: c.sev === 'Critical' ? 3 : c.sev === 'High' ? 2 : 1,
-      speed: 0,
-      lat: c.lat, lng: c.lng,
-    }));
+    entities = entities.concat(
+      CONFLICTS.map(c => {
+        const lat = (typeof c.lat === 'number') ? c.lat : null;
+        const lng = (typeof c.lng === 'number') ? c.lng : null;
+
+        return {
+          type: 'conflicts',
+          id: c.id,
+          name: c.title || `${c.region} conflict`,
+          sub: `${c.region} · ${c.type}`,
+          sev: c.sev || 'High',
+          speed: 0,
+          lat: lat,
+          lng: lng,
+          badge: 'CONF',
+          badgeCol: c.sev === 'Critical' ? 'ff1744' : 'ff6d00'
+        };
+      })
+    );
   }
 
+  // ───────── Cyber ─────────
   if (entFilter === 'all' || entFilter === 'cyber') {
-    CYBER.forEach(c => entities.push({
-      _type: 'cyber', _id: c.id,
-      icon: '⚡',
-      iconCol: c.kev ? '#f43f5e' : '#00e5ff',
-      name: c.cve || 'Unknown',
-      sub: c.sys || '—',
-      badge: c.kev ? 'KEV' : `CVSS ${c.cvss}`,
-      badgeCol: c.kev ? '#f43f5e' : c.cvss >= 9 ? '#f43f5e' : c.cvss >= 7 ? '#fb923c' : '#fbbf24',
-      detail: `${c.sector}  ·  ${c.status}  ·  ${c.age}h ago`,
-      sev: c.kev ? 4 : Math.round(c.cvss / 2.5),
-      speed: 0,
-      lat: null, lng: null,
-    }));
+    entities = entities.concat(
+      CYBER.map(c => {
+        const lat = (typeof c.lat === 'number') ? c.lat : null;
+        const lng = (typeof c.lng === 'number') ? c.lng : null;
+
+        return {
+          type: 'cyber',
+          id: c.id,
+          name: c.cve || c.title || 'Cyber issue',
+          sub: `${c.sector || 'General'} · ${c.vendor || 'Vendor'}`,
+          sev: c.cvss >= 9 ? 'Critical' : c.cvss >= 7 ? 'High' : 'Medium',
+          speed: 0,
+          lat: lat,
+          lng: lng,
+          badge: `CVSS ${c.cvss?.toFixed(1) || '-'}`,
+          badgeCol: c.cvss >= 9 ? 'ff1744' : c.cvss >= 7 ? 'ff6d00' : '00e5ff'
+        };
+      })
+    );
   }
 
-  // Filter by search query
-  if (q) entities = entities.filter(e =>
-    e.name.toLowerCase().includes(q) || e.sub.toLowerCase().includes(q) || e.badge.toLowerCase().includes(q)
-  );
+  // ───────── Search Filter ─────────
+  if (q) {
+    entities = entities.filter(e =>
+      e.name.toLowerCase().includes(q) ||
+      e.sub.toLowerCase().includes(q)
+    );
+  }
 
-  // Sort
-  if (sort === 'name')     entities.sort((a,b) => a.name.localeCompare(b.name));
-  else if (sort === 'severity') entities.sort((a,b) => b.sev - a.sev);
-  else if (sort === 'speed') entities.sort((a,b) => b.speed - a.speed);
+  // ───────── Sorting ─────────
+  if (sort === 'name') {
+    entities.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (sort === 'severity') {
+    const order = ['Critical','High','Medium','Low'];
+    entities.sort((a, b) => order.indexOf(a.sev) - order.indexOf(b.sev));
+  } else if (sort === 'speed') {
+    entities.sort((a, b) => (b.speed || 0) - (a.speed || 0));
+  }
 
+  // ───────── Render Count ─────────
   if (countEl) countEl.textContent = `${entities.length} entities`;
 
-  if (entities.length === 0) {
-    body.innerHTML = `<div style="color:rgba(0,229,255,.78);font-family:var(--mono);font-size:13px;text-align:center;padding:40px 20px;line-height:2">
-      <div style="font-size:28px;margin-bottom:12px;opacity:.3"><svg width="28" height="28" viewBox="0 0 18 18" fill="none"><circle cx="7.5" cy="7.5" r="5" stroke="currentColor" stroke-width="1.3"/><line x1="11.5" y1="11.5" x2="16" y2="16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
-      No entities match current filter<br>
-      <span style="font-size:11px;color:rgba(0,229,255,.75)">Try clearing the search or selecting a different category</span>
-    </div>`;
-    return;
-  }
+  // ───────── Render Rows ─────────
+  body.innerHTML = entities.map((e, i) => {
+    const sevCol = e.sev === 'Critical' ? '#ff1744' :
+                   e.sev === 'High'     ? '#ff6d00' :
+                   e.sev === 'Medium'   ? '#fbbf24' : '#22c55e';
+    const idx = i + 1;
 
-  body.innerHTML = entities.map((e, i) => `
-    <div onclick="selectEntityFromList('${e._type}','${e._id}',${e.lat||0},${e.lng||0})"
-         onmouseover="this.style.background='rgba(0,229,255,.05)';this.style.borderColor='rgba(0,229,255,.12)'" 
-         onmouseout="this.style.background='transparent';this.style.borderColor='rgba(0,229,255,.04)'"
-         style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid rgba(0,229,255,.04);cursor:pointer;transition:all .15s;position:relative">
-      <div style="width:32px;height:32px;border-radius:8px;background:${e.iconCol}14;border:1px solid ${e.iconCol}36;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;color:${e.iconCol}">${e.icon}</div>
-      <div style="flex:1;min-width:0">
-        <div style="color:rgba(230,242,255,.9);font-size:13px;font-weight:700;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.name}</div>
-        <div style="color:rgba(148,163,184,.5);font-size:11px;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">${e.sub}</div>
-        <div style="color:rgba(100,130,160,.82);font-size:10.5px;font-family:var(--mono);margin-top:2px">${e.detail}</div>
+    // FIX: Use ?? to pass literal null when coords missing (preserves valid 0 values)
+    const latParam = e.lat !== null && e.lat !== undefined ? e.lat : 'null';
+    const lngParam = e.lng !== null && e.lng !== undefined ? e.lng : 'null';
+
+    return `
+      <div class="ident-row"
+           onclick="selectEntityFromList('${e.type}', '${e.id}', ${latParam}, ${lngParam})"
+           style="display:flex;align-items:flex-start;gap:8px;padding:7px 10px;border-bottom:1px solid rgba(15,23,42,0.9);cursor:pointer;transition:background 0.15s;">
+        <div style="width:18px;text-align:right;font-family:var(--mono);font-size:10px;color:rgba(148,163,184,0.8);padding-top:2px;">${idx}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-family:var(--mono);font-size:11.5px;color:rgba(226,232,240,0.95);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.name}</span>
+            <span style="font-family:var(--mono);font-size:9px;padding:1px 5px;border-radius:3px;background:#${e.badgeCol}20;color:#${e.badgeCol};border:1px solid #${e.badgeCol}60;">${e.badge}</span>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:rgba(148,163,184,0.8);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.sub}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;">
+          <span style="font-family:var(--mono);font-size:9px;padding:1px 6px;border-radius:999px;border:1px solid ${sevCol}55;color:${sevCol};background:${sevCol}12;">${e.sev}</span>
+          ${e.speed ? `<span style="font-family:var(--mono);font-size:9px;color:rgba(148,163,184,0.8);">${Math.round(e.speed)} kt</span>` : ''}
+        </div>
       </div>
-      <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-        <div style="background:${e.badgeCol}1a;color:${e.badgeCol};border:1px solid ${e.badgeCol}40;padding:2px 8px;border-radius:4px;font-size:10.5px;font-family:var(--mono);font-weight:700;letter-spacing:.5px">${e.badge}</div>
-        ${e.lat?`<div style="color:rgba(0,229,255,.78);font-size:10px;font-family:var(--mono)">◎ ${Number(e.lat).toFixed(1)}°, ${Number(e.lng).toFixed(1)}°</div>`:''}
-      </div>
-    </div>`).join('');
+    `;
+  }).join('');
 }
 window.renderEntityList = renderEntityList;
 
 function selectEntityFromList(type, id, lat, lng) {
-  // Highlight on globe — spin to location if we have coords
-  if (lat && lng && Math.abs(lat) <= 90) {
+  // ───────── Strict Coordinate Validation ─────────
+  const hasValidCoords = (
+    lat !== null && lng !== null &&
+    typeof lat === 'number' && typeof lng === 'number' &&
+    !isNaN(lat) && !isNaN(lng) &&
+    Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+  );
+
+  if (hasValidCoords) {
+    // Convert lat/lng to globe rotation values
     const targetRotX = Math.max(-85, Math.min(85, -lat));
     const targetRotY = -lng;
-    // Smooth spin to target
+
     const startX = rotX, startY = rotY;
     const dX = targetRotX - startX;
+    
+    // Normalize longitude delta to shortest arc
     let dY = targetRotY - startY;
     while (dY > 180) dY -= 360;
     while (dY < -180) dY += 360;
+
+    // Animation config
     const steps = 40;
     let step = 0;
-    const ease = t => t < .5 ? 2*t*t : -1+(4-2*t)*t;
+    const ease = t => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t);
+
+    // Smooth spin animation
     const spin = () => {
-      step++;
       const t = ease(step / steps);
       rotX = startX + dX * t;
       rotY = startY + dY * t;
-      if (step < steps) requestAnimationFrame(spin);
+      step++;
+      if (step <= steps) {
+        requestAnimationFrame(spin);
+      }
     };
+
+    // Stop auto-rotate and start animation
     autoRotate = false;
     requestAnimationFrame(spin);
+
+  } else {
+    // Debug: log entities with missing/invalid coords
+    console.warn(`[Entity Zoom] Invalid coords for ${type}/${id}:`, { lat, lng });
+    // Entity will still be highlighted below
   }
-  // Flash highlight on the entity
-  globeHighlight = { type, id: String(id), pulse: 0 };
-  setTimeout(() => { globeHighlight = null; }, 3000);
+
+  // ───────── Always Highlight Entity on Globe ─────────
+  globeHighlight = { type: type, id: String(id), pulse: 0 };
+  
+  // Clear highlight after 3 seconds
+  setTimeout(() => {
+    if (globeHighlight?.id === id) {
+      globeHighlight = null;
+    }
+  }, 3000);
 }
 window.selectEntityFromList = selectEntityFromList;
 

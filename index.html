@@ -5110,10 +5110,20 @@ function buildPanel(){
 // WATCHLIST — persistent entity tracking across all feeds
 // ═══════════════════════════════════════════════════════════
 let WATCHLIST = [];
+let _wlToastQueue = [];
+let _wlToastActive = false;
+let _wlPrevHitSigs = {}; // tracks previous hit signatures to detect NEW hits only
+
 (function initWatchlist() {
   try {
     const saved = localStorage.getItem('pantheon_watchlist');
-    if (saved) WATCHLIST = JSON.parse(saved);
+    if (saved) {
+      WATCHLIST = JSON.parse(saved);
+      // rebuild prev signatures on load so we don't re-toast old hits
+      WATCHLIST.forEach(w => {
+        _wlPrevHitSigs[w.id] = new Set((w.hits||[]).map(h => h.sig));
+      });
+    }
   } catch(e) {}
 })();
 
@@ -5122,40 +5132,169 @@ function saveWatchlist() {
 }
 
 function addToWatchlist(item) {
-  // item: { type, id, label, threshold, notes }
-  if (WATCHLIST.find(w => w.id === item.id && w.type === item.type)) return;
-  WATCHLIST.push({ ...item, added: Date.now(), hits: [], lastHit: null });
+  const key = item.label.trim().toLowerCase();
+  if (!key) return;
+  // dedupe by label+type
+  if (WATCHLIST.find(w => w.label.toLowerCase() === key && w.type === item.type)) return;
+  const entry = { ...item, id: item.type + '_' + Date.now(), added: Date.now(), hits: [], lastHit: null };
+  WATCHLIST.push(entry);
+  _wlPrevHitSigs[entry.id] = new Set();
   saveWatchlist();
   checkWatchlistHits();
+  updateWatchlistBadge();
   if (currentTab === 'REPORT') renderPanel();
 }
 
 function removeFromWatchlist(id, type) {
   WATCHLIST = WATCHLIST.filter(w => !(w.id === id && w.type === type));
+  delete _wlPrevHitSigs[id];
   saveWatchlist();
+  updateWatchlistBadge();
   if (currentTab === 'REPORT') renderPanel();
 }
 
+function updateWatchlistBadge() {
+  const totalHits = WATCHLIST.reduce((n, w) => n + (w.hits ? w.hits.length : 0), 0);
+  let badge = document.getElementById('wl-dock-badge');
+  const btn = document.getElementById('dock-report');
+  if (!btn) return;
+  if (totalHits > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'wl-dock-badge';
+      badge.style.cssText = 'position:absolute;top:-4px;right:-4px;background:#f43f5e;color:#fff;font-size:9px;font-weight:700;font-family:var(--mono);min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;box-shadow:0 0 6px #f43f5e;animation:pulseRed .8s infinite;pointer-events:none;z-index:10';
+      btn.style.position = 'relative';
+      btn.appendChild(badge);
+    }
+    badge.textContent = totalHits > 99 ? '99+' : totalHits;
+  } else {
+    if (badge) badge.remove();
+  }
+}
+
+function showWatchlistToast(label, hitText, sev) {
+  _wlToastQueue.push({ label, hitText, sev });
+  if (!_wlToastActive) drainWlToast();
+}
+
+function drainWlToast() {
+  if (!_wlToastQueue.length) { _wlToastActive = false; return; }
+  _wlToastActive = true;
+  const { label, hitText, sev } = _wlToastQueue.shift();
+  const col = sev === 'Critical' ? '#f43f5e' : sev === 'High' ? '#fb923c' : '#00e5ff';
+  const toast = document.createElement('div');
+  toast.style.cssText = `position:fixed;top:18px;left:50%;transform:translateX(-50%) translateY(-60px);z-index:99999;background:rgba(10,16,26,.97);border:1px solid ${col};border-left:3px solid ${col};border-radius:6px;padding:10px 18px 10px 14px;display:flex;align-items:flex-start;gap:10px;min-width:320px;max-width:480px;box-shadow:0 4px 24px rgba(0,0,0,.7);transition:transform .3s cubic-bezier(.22,1,.36,1),opacity .3s`;
+  toast.innerHTML = `
+    <div style="width:8px;height:8px;border-radius:50%;background:${col};box-shadow:0 0 8px ${col};flex-shrink:0;margin-top:3px;animation:pulseRed .8s infinite"></div>
+    <div style="flex:1;min-width:0">
+      <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:${col};letter-spacing:1.5px;margin-bottom:3px">◉ WATCHLIST HIT — ${label.toUpperCase()}</div>
+      <div style="font-size:12px;color:rgba(220,235,255,.9);line-height:1.45;word-break:break-word">${hitText.slice(0,120)}</div>
+    </div>
+    <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:rgba(148,163,184,.5);font-size:14px;cursor:pointer;flex-shrink:0;padding:0;line-height:1;margin-top:-1px">✕</button>`;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => { toast.style.transform = 'translateX(-50%) translateY(0)'; });
+  setTimeout(() => {
+    toast.style.opacity = '0'; toast.style.transform = 'translateX(-50%) translateY(-20px)';
+    setTimeout(() => { toast.remove(); drainWlToast(); }, 350);
+  }, 5000);
+}
+
+function injectWatchlistHitToFeed(label, hitText, sev, src) {
+  const col = sev === 'Critical' ? '#f43f5e' : sev === 'High' ? '#fb923c' : '#00e5ff';
+  const brk = document.getElementById('fi-breaking');
+  if (!brk) return;
+  const el = document.createElement('div');
+  el.className = 'feed-item';
+  el.style.cssText = `border-left:2px solid ${col}66;padding-left:8px;animation:feedScroll .3s ease`;
+  el.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:5px">
+      <div style="width:7px;height:7px;border-radius:50%;background:${col};box-shadow:0 0 5px ${col};flex-shrink:0;margin-top:3px"></div>
+      <span style="color:rgba(240,246,255,.85);font-size:11.5px;line-height:1.45">◉ <b style="color:${col}">${label}</b> — ${hitText.slice(0,80)}</span>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:3px;padding-left:12px">
+      <span style="background:rgba(244,63,94,.15);color:${col};font-size:10px;font-weight:700;font-family:var(--mono);padding:0 4px;border-radius:2px">WATCHLIST</span>
+      <span style="color:rgba(148,163,184,.85);font-size:10px;font-family:var(--mono)">${src}</span>
+      <span style="color:rgba(148,163,184,.82);font-size:10px;font-family:var(--mono);margin-left:auto">Just now</span>
+    </div>`;
+  brk.prepend(el);
+  // trim to max 12 items
+  while (brk.children.length > 12) brk.removeChild(brk.lastChild);
+  // update breaking count badge
+  const brkCount = document.getElementById('feed-breaking-count');
+  if (brkCount) brkCount.textContent = brk.children.length;
+}
+
 function checkWatchlistHits() {
+  let anyNew = false;
   WATCHLIST.forEach(w => {
     const hits = [];
     const q = w.label.toLowerCase();
+    const qmmsi = w.label.replace(/\D/g,''); // extract digits for MMSI matching
+
     if (w.type === 'keyword' || w.type === 'region') {
-      CONFLICTS.forEach(c => { if ((c.region+' '+c.type+' '+(c.detail||'')).toLowerCase().includes(q)) hits.push({src:'CONFLICT', text: c.region+' — '+c.type, sev: c.sev, ts: Date.now()}); });
-      NEWS.forEach(n => { if (n.hl.toLowerCase().includes(q)) hits.push({src:'NEWS', text: n.hl.slice(0,80), sev:'Info', ts: Date.now()}); });
-      ALERTS.forEach(a => { if (a.title.toLowerCase().includes(q)) hits.push({src:'ALERT', text: a.title.slice(0,80), sev: a.sev, ts: Date.now()}); });
+      CONFLICTS.forEach(c => {
+        if ((c.region+' '+c.type+' '+(c.detail||'')).toLowerCase().includes(q))
+          hits.push({ src:'CONFLICT', text: c.region+' — '+c.type+' — '+(c.detail||'').slice(0,60), sev: c.sev, ts: Date.now(), sig: 'conflict_'+c.region+c.type });
+      });
+      NEWS.forEach(n => {
+        if (n.hl.toLowerCase().includes(q))
+          hits.push({ src:'NEWS', text: n.hl.slice(0,100), sev: n.breaking?'High':'Info', ts: Date.now(), sig: 'news_'+n.hl.slice(0,40) });
+      });
+      ALERTS.forEach(a => {
+        if (a.title.toLowerCase().includes(q))
+          hits.push({ src:'ALERT', text: a.title.slice(0,100), sev: a.sev, ts: Date.now(), sig: 'alert_'+a.title.slice(0,40) });
+      });
     }
+
     if (w.type === 'vessel') {
-      vessels.forEach(v => { if (v.name.toLowerCase().includes(q)||v.mmsi===w.id) hits.push({src:'AIS', text: v.name+' — '+v.status+' — '+v.flag, sev:'Info', ts: Date.now()}); });
+      vessels.forEach(v => {
+        const nameMatch = v.name && v.name.toLowerCase().includes(q);
+        const mmsiMatch = qmmsi.length >= 6 && v.mmsi && String(v.mmsi) === qmmsi;
+        if (nameMatch || mmsiMatch)
+          hits.push({ src:'AIS', text: `${v.name} — ${v.type||'vessel'} — ${v.flag||'—'} — ${v.status||'underway'} — spd ${v.speed||0}kn`, sev:'Info', ts: Date.now(), sig: 'ais_'+v.mmsi });
+      });
     }
+
+    if (w.type === 'flight') {
+      if (typeof flights !== 'undefined') {
+        flights.forEach(f => {
+          const cs = (f.callsign||f.icao||'').toLowerCase();
+          if (cs.includes(q) || (f.tail||'').toLowerCase().includes(q))
+            hits.push({ src:'ADS-B', text: `${f.callsign||f.icao} — ${f.type||'aircraft'} — ${f.origin||'—'} → ${f.dest||'—'} — alt ${f.alt||0}ft`, sev:'Info', ts: Date.now(), sig: 'flight_'+cs });
+        });
+      }
+    }
+
     if (w.type === 'cve') {
-      CYBER.forEach(c => { if (c.cve.toLowerCase().includes(q)) hits.push({src:'CVE', text: c.cve+' CVSS '+c.cvss+' — '+c.status, sev: c.cvss>=9?'Critical':'High', ts: Date.now()}); });
+      CYBER.forEach(c => {
+        if (c.cve.toLowerCase().includes(q))
+          hits.push({ src:'CVE', text: `${c.cve} CVSS ${c.cvss} — ${c.status} — ${(c.summary||'').slice(0,60)}`, sev: c.cvss>=9?'Critical':'High', ts: Date.now(), sig: 'cve_'+c.cve });
+      });
     }
+
+    // detect genuinely NEW hits (not seen last cycle)
+    const prevSigs = _wlPrevHitSigs[w.id] || new Set();
+    const newHits = hits.filter(h => !prevSigs.has(h.sig));
+    newHits.forEach(h => {
+      anyNew = true;
+      showWatchlistToast(w.label, h.text, h.sev);
+      injectWatchlistHitToFeed(w.label, h.text, h.sev, h.src);
+    });
+
+    // update stored sigs
+    _wlPrevHitSigs[w.id] = new Set(hits.map(h => h.sig));
+
     if (hits.length > 0) {
-      w.hits = hits.slice(0, 10);
+      w.hits = hits.slice(0, 15);
       w.lastHit = Date.now();
+    } else {
+      // clear stale hits if nothing matches anymore
+      w.hits = [];
     }
   });
+
+  if (anyNew) saveWatchlist();
+  updateWatchlistBadge();
 }
 window.addToWatchlist = addToWatchlist;
 window.removeFromWatchlist = removeFromWatchlist;
@@ -5453,32 +5592,47 @@ function reportPanel() {
   <!-- WATCHLIST MANAGER (screen only) -->
   <div class="no-print" style="margin-top:16px;background:rgba(0,229,255,.03);border:1px solid rgba(0,229,255,.15);border-radius:8px;overflow:hidden">
     <div style="background:rgba(0,229,255,.06);padding:8px 14px;border-bottom:1px solid rgba(0,229,255,.1);display:flex;align-items:center;gap:10px">
-      <span style="color:rgba(0,229,255,.9);font-size:11px;font-weight:700;letter-spacing:2px">◉ WATCHLIST</span>
+      <div style="width:7px;height:7px;border-radius:50%;background:#00e5ff;box-shadow:0 0 6px #00e5ff;animation:pulseCyan 1.5s infinite;flex-shrink:0"></div>
+      <span style="color:rgba(0,229,255,.9);font-size:11px;font-weight:700;letter-spacing:2px">WATCHLIST</span>
       <span style="color:rgba(0,229,255,.4);font-size:11px">${WATCHLIST.length} monitored</span>
+      ${WATCHLIST.reduce((n,w)=>n+(w.hits?w.hits.length:0),0)>0?`<span style="margin-left:auto;background:rgba(244,63,94,.2);color:#f43f5e;border:1px solid rgba(244,63,94,.35);padding:1px 8px;border-radius:8px;font-size:10px;font-weight:700;font-family:var(--mono);animation:pulseRed .8s infinite">${WATCHLIST.reduce((n,w)=>n+(w.hits?w.hits.length:0),0)} ACTIVE HIT${WATCHLIST.reduce((n,w)=>n+(w.hits?w.hits.length:0),0)>1?'S':''}</span>`:''}
     </div>
     <div style="padding:10px 14px">
-      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
         <select id="wl-type" style="background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.2);color:rgba(200,220,255,.9);padding:5px 8px;border-radius:4px;font-family:var(--mono);font-size:11px;cursor:pointer">
           <option value="keyword">KEYWORD</option>
           <option value="region">REGION</option>
-          <option value="vessel">VESSEL</option>
+          <option value="vessel">VESSEL / MMSI</option>
+          <option value="flight">FLIGHT / CALLSIGN</option>
           <option value="cve">CVE</option>
         </select>
-        <input id="wl-input" type="text" placeholder="e.g. Taiwan, CVE-2026, vessel name…" style="flex:1;min-width:160px;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.2);color:rgba(200,220,255,.9);padding:5px 10px;border-radius:4px;font-family:var(--mono);font-size:11px;outline:none"
+        <input id="wl-input" type="text" placeholder="e.g. Taiwan, CVE-2026, Ever Given, BA123…" style="flex:1;min-width:160px;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.2);color:rgba(200,220,255,.9);padding:5px 10px;border-radius:4px;font-family:var(--mono);font-size:11px;outline:none"
           onkeydown="if(event.key==='Enter')document.getElementById('wl-add-btn').click()"/>
-        <button id="wl-add-btn" onclick="(function(){const t=document.getElementById('wl-type').value;const v=document.getElementById('wl-input').value.trim();if(!v)return;addToWatchlist({type:t,id:t+'_'+Date.now(),label:v});document.getElementById('wl-input').value='';})()" style="background:rgba(0,229,255,.12);border:1px solid rgba(0,229,255,.3);color:rgba(0,229,255,.9);padding:5px 14px;border-radius:4px;cursor:pointer;font-family:var(--mono);font-size:11px;font-weight:700">+ ADD</button>
+        <button id="wl-add-btn" onclick="(function(){const t=document.getElementById('wl-type').value;const v=document.getElementById('wl-input').value.trim();if(!v)return;addToWatchlist({type:t,label:v});document.getElementById('wl-input').value='';renderPanel&&renderPanel();})() " style="background:rgba(0,229,255,.12);border:1px solid rgba(0,229,255,.3);color:rgba(0,229,255,.9);padding:5px 14px;border-radius:4px;cursor:pointer;font-family:var(--mono);font-size:11px;font-weight:700">+ ADD</button>
+      </div>
+      <div style="font-size:10px;color:rgba(100,130,160,.55);font-family:var(--mono);margin-bottom:10px;padding:6px 10px;background:rgba(0,229,255,.02);border-radius:4px;border:1px solid rgba(0,229,255,.07)">
+        ◈ Hits surface instantly in the <b style="color:rgba(0,229,255,.6)">BREAKING</b> feed + on-screen alert &nbsp;·&nbsp; VESSEL accepts name or MMSI &nbsp;·&nbsp; FLIGHT accepts callsign or tail number
       </div>
       ${WATCHLIST.length===0
-        ?`<div style="color:rgba(100,130,160,.4);font-size:11px;text-align:center;padding:12px">No items. Add entities to monitor above.</div>`
-        :`<div style="display:flex;flex-direction:column;gap:5px">${WATCHLIST.map(w=>`
-        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:${w.hits&&w.hits.length?'rgba(244,63,94,.06)':'rgba(0,229,255,.03)'};border:1px solid ${w.hits&&w.hits.length?'rgba(244,63,94,.2)':'rgba(0,229,255,.1)'};border-radius:5px">
-          <span style="background:rgba(0,229,255,.1);color:rgba(0,229,255,.7);padding:1px 5px;border-radius:2px;font-size:9px;font-weight:700;flex-shrink:0">${(w.type||'KW').toUpperCase()}</span>
-          <span style="color:rgba(220,235,255,.9);font-size:12px;font-weight:600;flex:1">${w.label}</span>
-          ${w.hits&&w.hits.length
-            ?`<span style="background:rgba(244,63,94,.2);color:#f43f5e;border:1px solid rgba(244,63,94,.3);padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700">${w.hits.length} HIT${w.hits.length>1?'S':''}</span>`
-            :`<span style="color:rgba(100,130,160,.5);font-size:10px">—</span>`}
-          <button onclick="removeFromWatchlist('${w.id}','${w.type}')" style="background:transparent;border:1px solid rgba(244,63,94,.2);color:rgba(244,63,94,.5);width:22px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✕</button>
-        </div>`).join('')}</div>`}
+        ?`<div style="color:rgba(100,130,160,.4);font-size:11px;text-align:center;padding:16px;border:1px dashed rgba(0,229,255,.1);border-radius:6px">No items monitored. Add a keyword, vessel, flight or CVE above.</div>`
+        :`<div style="display:flex;flex-direction:column;gap:6px">${WATCHLIST.map(w=>{
+          const hasHits=w.hits&&w.hits.length>0;
+          const typeCol=w.type==='vessel'?'#0090d4':w.type==='flight'?'#a78bfa':w.type==='cve'?'#fb923c':'#00e5ff';
+          const typeLbl=w.type==='vessel'?'AIS':w.type==='flight'?'ADS-B':w.type==='cve'?'CVE':(w.type||'KW').toUpperCase();
+          return `<div style="background:${hasHits?'rgba(244,63,94,.05)':'rgba(0,229,255,.02)'};border:1px solid ${hasHits?'rgba(244,63,94,.25)':'rgba(0,229,255,.1)'};border-radius:6px;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 10px">
+              <span style="background:${typeCol}22;color:${typeCol};border:1px solid ${typeCol}44;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;font-family:var(--mono);flex-shrink:0">${typeLbl}</span>
+              <span style="color:rgba(220,235,255,.9);font-size:12px;font-weight:600;flex:1">${w.label}</span>
+              ${hasHits
+                ?`<span style="background:rgba(244,63,94,.2);color:#f43f5e;border:1px solid rgba(244,63,94,.35);padding:1px 8px;border-radius:8px;font-size:10px;font-weight:700;font-family:var(--mono)">${w.hits.length} HIT${w.hits.length>1?'S':''}</span>`
+                :`<span style="color:rgba(100,130,160,.4);font-size:10px;font-family:var(--mono)">MONITORING</span>`}
+              <button onclick="removeFromWatchlist('${w.id}','${w.type}')" style="background:transparent;border:1px solid rgba(244,63,94,.2);color:rgba(244,63,94,.5);width:22px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:4px">✕</button>
+            </div>
+            ${hasHits?`<div style="border-top:1px solid rgba(244,63,94,.1);padding:6px 10px;display:flex;flex-direction:column;gap:3px">
+              ${w.hits.slice(0,5).map(h=>{const hcol=h.sev==='Critical'?'#f43f5e':h.sev==='High'?'#fb923c':'rgba(148,163,184,.7)';return `<div style="display:flex;gap:8px;align-items:flex-start;padding:4px 6px;background:rgba(0,0,0,.2);border-radius:3px"><span style="font-size:9px;font-weight:700;font-family:var(--mono);color:${hcol};flex-shrink:0;padding-top:1px">${h.src}</span><span style="font-size:11px;color:rgba(200,220,240,.8);line-height:1.4;flex:1">${h.text.slice(0,100)}</span></div>`;}).join('')}
+              ${w.hits.length>5?`<div style="font-size:10px;color:rgba(100,130,160,.5);font-family:var(--mono);text-align:center;padding-top:2px">+ ${w.hits.length-5} more hits</div>`:''}
+            </div>`:''}
+          </div>`;}).join('')}</div>`}
     </div>
   </div>
 

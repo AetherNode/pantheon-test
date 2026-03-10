@@ -1014,7 +1014,23 @@ html,body{height:100%;overflow:hidden;background:var(--bg);font-family:var(--ui)
     break-inside: avoid;
   }
 
-  @page { margin: 12mm 14mm; size: A4 portrait; }
+  @page { margin: 0; size: A4 portrait; }
+
+  /* Single-page: the inner padding div already has 10mm padding built-in */
+  #pantheon-print-root #report-printable {
+    width: 210mm !important;
+    height: 297mm !important;
+    max-height: 297mm !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  #pantheon-print-root #report-printable > div {
+    height: 267mm !important;
+    overflow: hidden !important;
+  }
 
   /* Belt-and-braces: kill mobile nav even if narrow viewport triggers mobile CSS */
   #mobile-tab-bar { display: none !important; visibility: hidden !important; position: absolute !important; height: 0 !important; overflow: hidden !important; }
@@ -1923,64 +1939,64 @@ async function fetchLiveVessels() {
   // NO proxy needed — direct fetch just like adsb.lol does for planes
   // ══════════════════════════════════════════════════════════════
 
-  // ── SOURCE 1: Digitraffic Finland — CORS *, no custom headers ──
-  // CRITICAL: Do NOT send custom headers — they trigger CORS preflight which fails
-  // Just like adsb.lol: plain fetch(), no proxy, no extra headers
+  // ── SOURCE 1: Digitraffic Finland — correct endpoint, CORS-enabled ──
+  // Endpoint: /api/ais/v1/locations (NOT /api/v1/locations/latest — that doesn't exist)
+  // Digitraffic explicitly allows Digitraffic-User in CORS preflight — it's their documented header
   const tryDigitraffic = async () => {
     const results = [];
+    const t0 = Date.now();
     try {
-      netLog('Trying Digitraffic...');
-      const res = await fetch('https://meri.digitraffic.fi/api/v1/locations/latest', {
-        signal: AbortSignal.timeout(10000)
-        // NO custom headers — they break CORS preflight
+      netLog('Trying Digitraffic /api/ais/v1/locations ...');
+      const res = await fetch('https://meri.digitraffic.fi/api/ais/v1/locations', {
+        signal: AbortSignal.timeout(12000),
+        headers: { 'Digitraffic-User': 'PANTHEON/1.0' }
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       const features = data.features || [];
-      netLog(`Digitraffic: ${features.length} vessels`);
-      features.slice(0, 150).forEach((f, i) => {
+      netLog(`Digitraffic: ${features.length} vessel positions`);
+      features.slice(0, 200).forEach((f, i) => {
         const p = f.properties || {};
-        const [lng, lat] = f.geometry?.coordinates || [0, 0];
+        const coords = f.geometry?.coordinates;
+        if (!coords) return;
+        const [lng, lat] = coords;
         if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
         results.push(makeVessel(p.mmsi||i, p.name||`FIN-${i}`, lat, lng,
           p.heading||p.courseOverGround||0, p.speedOverGround||0,
           shipTypeFromCode(p.shipType), 'FI', p.mmsi, p.destination, 'Digitraffic'));
       });
-      if (results.length > 0) setFeedStatus('digitraffic','live',results.length,'',0);
-      else setFeedStatus('digitraffic','failed',0,'No features returned',0);
+      setFeedStatus('digitraffic', results.length>0?'live':'failed', results.length, results.length===0?'No features':'', Date.now()-t0);
     } catch(e) {
-      netLog(`Digitraffic: ${e.message}`);
-      setFeedStatus('digitraffic','failed',0,e.message,0);
+      netLog(`Digitraffic FAILED: ${e.message}`);
+      setFeedStatus('digitraffic','failed',0,e.message,Date.now()-t0);
     }
     return results;
   };
 
-  // ── SOURCE 2: Norwegian Kystdatahuset — CORS *, free, public AIS ──
-  // Same as adsb.lol: community infrastructure, CORS enabled by design
+  // ── SOURCE 2: Barentswatch Norway — free public AIS, CORS-enabled REST ──
+  // api.barentswatch.no/live/v1/ais — requires free token but has an open endpoint
+  // Fallback to basic vessel list endpoint
   const tryKystdatahuset = async () => {
     const results = [];
     try {
-      netLog('Trying Norwegian AIS (Kystdatahuset)...');
-      // Norwegian Coastal Administration — all vessels in Norwegian waters
-      const res = await fetch('https://kystdatahuset.no/ws/api/ais/positions/all/latest', {
+      netLog('Trying Barentswatch/Norwegian AIS...');
+      // Try the open BarentsWatch vessel list (no auth required for basic positions)
+      const res = await fetch('https://www.barentswatch.no/bwapi/v2/geodata/ais/openpositions?Xlimit=200', {
         signal: AbortSignal.timeout(10000)
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
-      const items = Array.isArray(data) ? data : (data.data || data.vessels || []);
-      netLog(`Kystdatahuset: ${items.length} vessels`);
-      items.slice(0, 200).forEach((v, i) => {
-        const lat = parseFloat(v.latitude||v.lat||v.LAT||0);
-        const lng = parseFloat(v.longitude||v.lon||v.LON||0);
+      const items = Array.isArray(data) ? data : (data.vessels || data.features || []);
+      netLog(`Barentswatch: ${items.length} vessels`);
+      items.slice(0, 150).forEach((v, i) => {
+        const lat = parseFloat(v.latitude||v.lat||0);
+        const lng = parseFloat(v.longitude||v.lon||0);
         if (!lat||!lng||isNaN(lat)||isNaN(lng)) return;
-        results.push(makeVessel(v.mmsi||v.MMSI||i, v.name||v.shipName||v.SHIPNAME||`NOR-${i}`,
-          lat, lng, v.courseOverGround||v.cog||v.COG||0, v.speedOverGround||v.sog||v.SOG||0,
-          shipTypeFromCode(v.shipType||v.SHIPTYPE), 'NO', v.mmsi||v.MMSI, v.destination||'—', 'Kystdatahuset'));
+        results.push(makeVessel(v.mmsi||i, v.name||v.shipName||`NOR-${i}`,
+          lat, lng, v.courseOverGround||v.cog||0, v.speedOverGround||v.sog||0,
+          shipTypeFromCode(v.shipType), 'NO', v.mmsi, v.destination||'—', 'Barentswatch'));
       });
-      if (results.length > 0) setFeedStatus('digitraffic','live',results.length,'NOR waters',0);
-    } catch(e) {
-      netLog(`Kystdatahuset: ${e.message}`);
-    }
+    } catch(e) { netLog(`Barentswatch: ${e.message}`); }
     return results;
   };
 
@@ -2014,7 +2030,8 @@ async function fetchLiveVessels() {
     try {
       netLog('Trying NOAA/MarineCadastre...');
       // Live vessel positions — ArcGIS feature service, CORS enabled
-      const url = 'https://coast.noaa.gov/arcgis/rest/services/MarineCadastre/AISVesselTransitCounts2022/MapServer/0/query?where=1%3D1&outFields=*&resultRecordCount=50&f=json';
+      // NOAA AIS vessel tracks - most recent available via public ArcGIS REST (CORS enabled)
+      const url = 'https://coast.noaa.gov/arcgis/rest/services/MarineCadastre/AISVesselTransitCounts2020/MapServer/0/query?where=1%3D1&outFields=MMSI,LON,LAT,SOG,COG,VesselName,VesselType&geometry=-180,-90,180,90&geometryType=esriGeometryEnvelope&resultRecordCount=100&f=json';
       const res = await fetch(url, { signal: AbortSignal.timeout(9000) });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
@@ -4682,7 +4699,7 @@ function toggle(id){expanded.has(id)?expanded.delete(id):expanded.add(id);render
 function renderPanel(){
   const el=document.getElementById("panel-body");
   el.style.opacity="0";
-  setTimeout(()=>{el.innerHTML=buildPanel();el.style.transition="opacity .1s";el.style.opacity="1";},60);
+  setTimeout(()=>{el.innerHTML=buildPanel();el.style.transition="opacity .1s";el.style.opacity="1";if(currentTab==='REPORT')populateReport();},60);
 }
 
 function mh(t){
@@ -5353,235 +5370,84 @@ function reportPanel() {
   ${loadingBanner}
 
   <!-- ═══════════════ PRINTABLE BODY ═══════════════ -->
-  <div id="report-printable" style="background:#fff;color:#111;overflow:visible;font-size:11px;line-height:1.5">
+  <div id="report-printable" style="background:#fff;color:#111;font-family:'Courier New',monospace;font-size:10px;line-height:1.45;width:100%;box-sizing:border-box">
+  <div style="padding:10mm 12mm;width:100%;box-sizing:border-box;height:267mm;overflow:hidden;display:flex;flex-direction:column;gap:0">
 
     <!-- MASTHEAD -->
-    <div style="background:#0f172a;color:#fff;padding:10px 16px;break-inside:avoid;page-break-inside:avoid">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="width:26px;height:26px;border-radius:50%;border:1.5px solid rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">◎</div>
-          <div>
-            <div style="font-size:15px;font-weight:900;letter-spacing:3px;line-height:1;color:#fff">PANTHEON</div>
-            <div style="font-size:7.5px;letter-spacing:2.5px;color:rgba(255,255,255,.4);margin-top:1px">INTELLIGENCE OPERATING SYSTEM · v14</div>
-          </div>
-        </div>
-        <div style="text-align:right">
-          <div style="color:rgba(255,255,255,.35);font-size:7.5px;letter-spacing:1px">REPORT REF</div>
-          <div style="color:#fff;font-size:12px;font-weight:800">${refId}</div>
-          <div style="color:rgba(255,255,255,.5);font-size:10px;margin-top:2px">${datestamp} · ${timestamp}</div>
-        </div>
-      </div>
-      <div style="margin-top:8px;padding:5px 10px;background:${threatLevel.bg};border-radius:3px;display:flex;align-items:center;gap:8px">
-        <div style="width:6px;height:6px;border-radius:50%;background:${threatLevel.c};flex-shrink:0"></div>
-        <span style="color:${threatLevel.c};font-size:10px;font-weight:800;letter-spacing:1.5px">COMPOSITE THREAT: ${threatLevel.l}</span>
-        <span style="color:${threatLevel.c};font-size:10px;opacity:.8;margin-left:auto">${crit.length} CRITICAL · ${high.length} HIGH · ${ALERTS.filter(a=>a.sev==='Medium').length} MEDIUM</span>
-      </div>
-      <div style="color:rgba(255,255,255,.35);font-size:7.5px;margin-top:6px">OPEN SOURCE · NOT OPERATIONALLY CERTIFIED · ${utc}</div>
-    </div>
-
-    <div style="padding:12px 16px">
-
-    <!-- EXECUTIVE SUMMARY -->
-    <div style="break-inside:avoid;page-break-inside:avoid;margin-bottom:10px">
-      ${H('◈','EXECUTIVE SUMMARY',null)}
-      <div style="background:#f8fafc;border-left:2px solid #0f172a;padding:7px 10px;border-radius:0 3px 3px 0;font-size:11px;color:#1e293b;line-height:1.6">
-        ${(()=>{const p=[];
-          if(topConflicts.length) p.push(`<strong>${topConflicts.length} conflict theatre${topConflicts.length>1?'s':''}</strong> — ${topConflicts.slice(0,3).map(c=>c.region.split('/')[0].trim()).join(', ')}.`);
-          if(crit.length) p.push(`<strong style="color:#dc2626">${crit.length} critical alert${crit.length>1?'s':''}</strong>.`);
-          if(topCyber.length) p.push(`<strong>${topCyber.length} unpatched CVSS≥9 CVE${topCyber.length>1?'s':''}</strong> — max: ${topCyber[0]?topCyber[0].cve+' ('+topCyber[0].cvss+')':'—'}.`);
-          if(alertMarkets.length) p.push(`Market stress: ${alertMarkets.slice(0,3).map(m=>`${m.asset} ${m.up?'▲':'▼'}${m.chg}%`).join(', ')}.`);
-          if(milFlights.length) p.push(`${milFlights.length} military aircraft · ${flights.filter(f=>f.type==='helicopter').length} helicopter.`);
-          if(CORRELATIONS.length) p.push(`<strong>${CORRELATIONS.length} cross-domain signal${CORRELATIONS.length>1?'s':''}</strong> detected.`);
-          return p.length?p.join(' '):'Feeds initialising.';
-        })()}
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px">
-        ${[['Vessels',vessels.length],['Aircraft',flights.length+' ('+milFlights.length+' mil)'],['Feeds live',liveFeeds+'/'+totalFeeds],['Generated',datestamp]].map(([l,v])=>`
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:3px;padding:4px 8px">
-          <div style="color:#64748b;font-size:9px;letter-spacing:.5px">${l}</div>
-          <div style="color:#111;font-size:11px;font-weight:700">${v}</div>
-        </div>`).join('')}
-      </div>
-    </div>
-
-    ${S}
-
-    <!-- CROSS-DOMAIN SIGNALS -->
-    <div style="margin-bottom:10px">
-      ${H('⊕','CROSS-DOMAIN SIGNALS',CORRELATIONS.length)}
-      ${CORRELATIONS.length===0
-        ?`<div style="color:#94a3b8;font-size:10px;padding:4px 0">No signals detected.</div>`
-        :CORRELATIONS.map(cr=>`
-        <div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid #f1f5f9;break-inside:avoid;page-break-inside:avoid;align-items:flex-start">
-          <span style="background:${cr.strength==='HIGH'?'#dc2626':'#475569'};color:#fff;padding:0 4px;border-radius:2px;font-size:9px;font-weight:700;flex-shrink:0;margin-top:1px">${cr.strength}</span>
-          <span style="background:#f1f5f9;color:#475569;padding:0 4px;border-radius:2px;font-size:9px;flex-shrink:0;margin-top:1px">${(CORR_TYPE[cr.type]||cr.type)}</span>
-          <div style="flex:1;min-width:0">
-            <div style="color:#111;font-size:11px;font-weight:600">${cr.title}</div>
-            <div style="color:#64748b;font-size:10px">${cr.detail}</div>
-          </div>
-        </div>`).join('')}
-    </div>
-
-    ${S}
-
-    <!-- WATCHLIST -->
-    ${WATCHLIST.length>0?`
-    <div style="margin-bottom:10px">
-      ${H('◉','WATCHLIST',WATCHLIST.length)}
-      ${WATCHLIST.map(w=>`
-      <div style="display:flex;gap:6px;padding:3px 0;border-bottom:1px solid #f1f5f9;break-inside:avoid;page-break-inside:avoid;align-items:center">
-        <span style="background:#f1f5f9;color:#475569;padding:0 4px;border-radius:2px;font-size:9px;font-weight:700;flex-shrink:0">${(w.type||'KW').toUpperCase()}</span>
-        <span style="color:#111;font-size:11px;font-weight:600;flex:1">${w.label}</span>
-        ${w.hits&&w.hits.length
-          ?`<span style="background:#dc2626;color:#fff;padding:0 5px;border-radius:8px;font-size:9px;font-weight:700">${w.hits.length} HIT${w.hits.length>1?'S':''}</span>`
-          :`<span style="color:#94a3b8;font-size:10px">—</span>`}
-      </div>
-      ${w.hits&&w.hits.length?w.hits.slice(0,2).map(h=>`
-        <div style="display:flex;gap:6px;padding:2px 0 2px 16px;border-bottom:1px solid #f8fafc">
-          <span style="background:#f1f5f9;color:#475569;padding:0 4px;border-radius:2px;font-size:9px;flex-shrink:0">${h.src}</span>
-          <span style="color:#475569;font-size:10px;flex:1">${h.text}</span>
-        </div>`).join(''):''}
-      `).join('')}
-    </div>${S}`:''}
-
-    <!-- CRITICAL ALERTS -->
-    <div style="margin-bottom:10px">
-      ${H('⚡','CRITICAL ALERTS',crit.length)}
-      ${crit.length===0
-        ?`<div style="color:#94a3b8;font-size:10px;padding:3px 0">None at report time.</div>`
-        :crit.map((a,i)=>`
-        <div style="display:flex;gap:6px;padding:5px 0;border-bottom:1px solid #fee2e2;break-inside:avoid;page-break-inside:avoid">
-          <span style="color:#dc2626;font-size:10px;font-weight:800;flex-shrink:0;width:16px">${String(i+1).padStart(2,'0')}</span>
-          <div style="flex:1">
-            <div style="color:#111;font-size:11px;font-weight:700">${a.title}</div>
-            ${a.detail?`<div style="color:#475569;font-size:10px;margin-top:1px">${a.detail.slice(0,140)}${a.detail.length>140?'…':''}</div>`:''}
-            <div style="color:#94a3b8;font-size:9px;margin-top:2px">${a.mod} · ${AL(a.age)}${a.src?' · '+a.src[0]:''}</div>
-          </div>
-        </div>`).join('')}
-    </div>
-
-    ${high.length?`
-    <div style="margin-bottom:10px">
-      ${H('◆','HIGH PRIORITY',high.length)}
-      ${high.map((a,i)=>`
-      <div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid #ffedd5;break-inside:avoid;page-break-inside:avoid">
-        <span style="color:#ea580c;font-size:10px;font-weight:800;flex-shrink:0;width:16px">${String(i+1).padStart(2,'0')}</span>
-        <div style="flex:1">
-          <div style="color:#111;font-size:11px;font-weight:600">${a.title}</div>
-          <div style="color:#94a3b8;font-size:9px;margin-top:1px">${a.mod} · ${AL(a.age)}</div>
-        </div>
-      </div>`).join('')}
-    </div>${S}`:''}
-
-    <!-- CONFLICT THEATRES -->
-    <div style="margin-bottom:10px">
-      ${H('◆','ACTIVE CONFLICT THEATRES',topConflicts.length)}
-      ${topConflicts.length===0?`<div style="color:#94a3b8;font-size:10px">No data.</div>`
-        :topConflicts.map(c=>`
-        <div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid #f1f5f9;break-inside:avoid;page-break-inside:avoid">
-          <div style="width:6px;height:6px;border-radius:50%;background:${c.sev==='Critical'?'#dc2626':c.sev==='High'?'#ea580c':'#ca8a04'};flex-shrink:0;margin-top:4px"></div>
-          <div style="flex:1">
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <span style="color:#111;font-size:11px;font-weight:700">${c.region}</span>
-              <span style="border:1px solid ${c.sev==='Critical'?'#dc2626':c.sev==='High'?'#ea580c':'#ca8a04'};color:${c.sev==='Critical'?'#dc2626':c.sev==='High'?'#ea580c':'#ca8a04'};padding:0 4px;border-radius:2px;font-size:9px;font-weight:700">${c.sev.toUpperCase()}</span>
-              <span style="color:#64748b;font-size:10px">${c.type||''}</span>
-              <span style="color:#94a3b8;font-size:9px;margin-left:auto">${AL(c.age)} · ${c.src||'OSINT'}</span>
-            </div>
-            ${c.detail?`<div style="color:#475569;font-size:10px;margin-top:1px">${c.detail.slice(0,160)}${c.detail.length>160?'…':''}</div>`:''}
-          </div>
-        </div>`).join('')}
-    </div>
-
-    ${S}
-
-    <!-- CYBER POSTURE -->
-    <div style="margin-bottom:10px">
-      ${H('◎','CYBER THREAT POSTURE',CYBER.length)}
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:8px">
-        ${[['Total CVEs',CYBER.length],['CVSS≥9 Unpatched',topCyber.length],['KEV Listed',CYBER.filter(c=>c.kev).length],['Max CVSS',CYBER.length>0?Math.max(...CYBER.map(c=>c.cvss)):0]].map(([l,v])=>`
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:3px;padding:4px 8px;text-align:center">
-          <div style="color:#111;font-size:14px;font-weight:900">${v}</div>
-          <div style="color:#64748b;font-size:9px">${l}</div>
-        </div>`).join('')}
-      </div>
-      ${topCyber.map((c,i)=>`
-      <div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid #f1f5f9;break-inside:avoid;page-break-inside:avoid">
-        <span style="color:#94a3b8;font-size:10px;width:14px;flex-shrink:0">${i+1}.</span>
-        <div style="flex:1">
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <span style="color:#111;font-size:11px;font-weight:700">${c.cve}</span>
-            <span style="background:#dc2626;color:#fff;padding:0 5px;border-radius:2px;font-size:9px;font-weight:700">CVSS ${c.cvss}</span>
-            ${c.kev?`<span style="background:#7c3aed;color:#fff;font-size:9px;padding:0 4px;border-radius:2px;font-weight:700">EXPLOITED</span>`:''}
-          </div>
-          <div style="color:#475569;font-size:10px;margin-top:1px">${c.sys||c.sector} · ${c.age<48?c.age+'h ago':Math.round(c.age/24)+'d ago'}</div>
-        </div>
-      </div>`).join('')}
-    </div>
-
-    ${S}
-
-    <!-- MARKETS -->
-    <div style="margin-bottom:10px">
-      ${H('◈','MARKET INDICATORS',MARKETS.filter(m=>m.price!=='—').length)}
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px">
-        ${MARKETS.filter(m=>m.price!=='—').slice(0,12).map(m=>`
-        <div style="background:${m.alert?'#fffbeb':'#f8fafc'};border:1px solid ${m.alert?'#fde68a':'#e2e8f0'};border-radius:3px;padding:4px 8px;break-inside:avoid;page-break-inside:avoid">
-          <div style="color:#64748b;font-size:9px;margin-bottom:1px">${m.asset}</div>
-          <div style="color:#111;font-size:12px;font-weight:800">${m.price} <span style="font-size:9px;font-weight:400">${m.unit}</span></div>
-          <div style="color:${m.up?'#16a34a':'#dc2626'};font-size:10px;font-weight:700">${m.up?'▲':'▼'} ${m.chg}%</div>
-        </div>`).join('')}
-      </div>
-    </div>
-
-    ${S}
-
-    <!-- INFRASTRUCTURE -->
-    <div style="margin-bottom:10px">
-      ${H('⬡','INFRASTRUCTURE',INFRA.length)}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px">
-        ${INFRA.slice(0,12).map(inf=>`
-        <div style="display:flex;gap:5px;padding:3px 0;border-bottom:1px solid #f1f5f9;break-inside:avoid;page-break-inside:avoid;align-items:center">
-          <div style="width:6px;height:6px;border-radius:50%;background:${inf.status==='Critical'||inf.status==='Disrupted'?'#dc2626':inf.status==='Stressed'||inf.status==='Elevated Risk'?'#ea580c':'#16a34a'};flex-shrink:0"></div>
-          <div style="flex:1;min-width:0">
-            <span style="color:#111;font-size:10px;font-weight:600">${inf.name}</span>
-            <span style="color:#64748b;font-size:9px;margin-left:4px">${inf.pct}%</span>
-          </div>
-          <span style="color:${inf.status==='Critical'||inf.status==='Disrupted'?'#dc2626':inf.status==='Stressed'?'#ea580c':'#16a34a'};font-size:9px;font-weight:700;flex-shrink:0">${inf.status}</span>
-        </div>`).join('')}
-      </div>
-    </div>
-
-    ${S}
-
-    <!-- DOMAIN PICTURE + DATA PROVENANCE side by side -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:10px">
+    <div style="background:#0f172a;color:#fff;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;margin-bottom:6px">
       <div>
-        ${H('▶','DOMAIN PICTURE',null)}
-        <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:1.5px;margin-bottom:4px">MARITIME</div>
-        ${[['Vessels',vessels.length],['Underway',vessels.filter(v=>v.status==='active').length],['Anchored',vessels.filter(v=>v.status==='anchored').length]].map(([l,v])=>RP(l,v)).join('')}
-        <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:1.5px;margin:6px 0 4px">AVIATION</div>
-        ${[['Total',flights.length],['Military',milFlights.length],['Helicopter',flights.filter(f=>f.type==='helicopter').length]].map(([l,v])=>RP(l,v)).join('')}
+        <div style="font-size:13px;font-weight:900;letter-spacing:3px;font-family:'Courier New',monospace">PANTHEON INTELLIGENCE BRIEF</div>
+        <div style="font-size:8px;color:#94a3b8;letter-spacing:1.5px;margin-top:1px">OPEN SOURCE · NOT CERTIFIED OPERATIONAL INTELLIGENCE</div>
       </div>
-      <div>
-        ${H('◐','FEED STATUS',null)}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px">
-          ${Object.entries(FEED_STATUS).map(([k,v])=>`
-          <div style="display:flex;gap:4px;align-items:center;padding:2px 0">
-            <div style="width:5px;height:5px;border-radius:50%;background:${v.status==='live'?'#16a34a':v.status==='failed'?'#dc2626':'#94a3b8'};flex-shrink:0"></div>
-            <span style="color:#334155;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k.replace(/_/g,' ')}</span>
-          </div>`).join('')}
+      <div style="text-align:right">
+        <div id="pr-level" style="font-size:11px;font-weight:900;padding:2px 10px;border-radius:2px"></div>
+        <div id="pr-ref" style="font-size:8px;color:#94a3b8;margin-top:2px"></div>
+      </div>
+    </div>
+
+    <!-- BODY: 2 columns -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:1;min-height:0">
+
+      <!-- LEFT COLUMN -->
+      <div style="display:flex;flex-direction:column;gap:6px">
+
+        <!-- CRITICAL ALERTS -->
+        <div style="border:1.5px solid #dc2626;border-radius:2px;padding:5px 7px;flex-shrink:0">
+          <div style="font-size:8px;font-weight:900;letter-spacing:2px;color:#dc2626;margin-bottom:4px;border-bottom:1px solid #fecaca;padding-bottom:2px">⚡ CRITICAL ALERTS</div>
+          <div id="pr-crit"></div>
         </div>
+
+        <!-- HIGH ALERTS -->
+        <div style="border:1.5px solid #ea580c;border-radius:2px;padding:5px 7px;flex-shrink:0">
+          <div style="font-size:8px;font-weight:900;letter-spacing:2px;color:#ea580c;margin-bottom:4px;border-bottom:1px solid #fed7aa;padding-bottom:2px">◆ HIGH PRIORITY</div>
+          <div id="pr-high"></div>
+        </div>
+
+        <!-- CONFLICT THEATRES -->
+        <div style="border:1px solid #334155;border-radius:2px;padding:5px 7px;flex:1;min-height:0;overflow:hidden">
+          <div style="font-size:8px;font-weight:900;letter-spacing:2px;color:#334155;margin-bottom:4px;border-bottom:1px solid #e2e8f0;padding-bottom:2px">◆ CONFLICT THEATRES</div>
+          <div id="pr-conf"></div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT COLUMN -->
+      <div style="display:flex;flex-direction:column;gap:6px">
+
+        <!-- CYBER -->
+        <div style="border:1.5px solid #7c3aed;border-radius:2px;padding:5px 7px;flex-shrink:0">
+          <div style="font-size:8px;font-weight:900;letter-spacing:2px;color:#7c3aed;margin-bottom:4px;border-bottom:1px solid #ede9fe;padding-bottom:2px">◎ CRITICAL CYBER (CVSS≥9)</div>
+          <div id="pr-cyber"></div>
+        </div>
+
+        <!-- MARKETS + DOMAIN PICTURE side by side -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;flex-shrink:0">
+          <div style="border:1px solid #334155;border-radius:2px;padding:5px 7px">
+            <div style="font-size:8px;font-weight:900;letter-spacing:2px;color:#334155;margin-bottom:4px;border-bottom:1px solid #e2e8f0;padding-bottom:2px">◈ MARKETS</div>
+            <div id="pr-mkts"></div>
+          </div>
+          <div style="border:1px solid #334155;border-radius:2px;padding:5px 7px">
+            <div style="font-size:8px;font-weight:900;letter-spacing:2px;color:#334155;margin-bottom:4px;border-bottom:1px solid #e2e8f0;padding-bottom:2px">▶ DOMAIN PICTURE</div>
+            <div id="pr-domain"></div>
+          </div>
+        </div>
+
+        <!-- CORRELATIONS -->
+        <div style="border:1px solid #0891b2;border-radius:2px;padding:5px 7px;flex:1;min-height:0;overflow:hidden">
+          <div style="font-size:8px;font-weight:900;letter-spacing:2px;color:#0891b2;margin-bottom:4px;border-bottom:1px solid #cffafe;padding-bottom:2px">⟳ CROSS-DOMAIN SIGNALS</div>
+          <div id="pr-corr"></div>
+        </div>
+
       </div>
     </div>
 
     <!-- FOOTER -->
-    <div style="border-top:1px solid #e2e8f0;padding-top:6px;color:#94a3b8;font-size:9px;line-height:1.6">
-      <div style="font-weight:700;color:#64748b">CLASSIFICATION: OPEN SOURCE · NOT CERTIFIED OPERATIONAL INTELLIGENCE</div>
-      <div>Sources: GDELT 2.0 · NVD NIST · CISA KEV · AlienVault OTX · OpenSky · AISHub · NASA FIRMS · NOAA · Yahoo Finance · World Bank · EIA · ACLED · ReliefWeb · CelesTrak · OFAC</div>
-      <div style="margin-top:2px">Ref: ${refId} · ${utc} · PANTHEON v14</div>
+    <div style="border-top:1px solid #e2e8f0;margin-top:5px;padding-top:3px;display:flex;justify-content:space-between;flex-shrink:0">
+      <span style="font-size:7.5px;color:#94a3b8">GDELT · NVD/NIST · CISA KEV · AISHub · AISStream · adsb.lol · NASA FIRMS · NOAA · Yahoo Finance · ACLED · ReliefWeb</span>
+      <span id="pr-footer" style="font-size:7.5px;color:#94a3b8"></span>
     </div>
 
-    </div><!-- /padding div -->
+  </div>
   </div><!-- /report-printable -->
 
   <!-- WATCHLIST MANAGER (screen only) -->
@@ -10181,29 +10047,141 @@ window.addToWatchlist=addToWatchlist; window.removeFromWatchlist=removeFromWatch
   hookTlResize();
 })();
 
+// ── Populate single-page report with live data ──────────────────
+function populateReport() {
+  const g = id => document.getElementById(id);
+  if (!g('pr-crit')) return; // panel not rendered yet
+
+  const now = new Date();
+  const refId = 'PTH-' + now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + '-' + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
+  const utcStr = now.toUTCString();
+
+  const AL = age => age < 1 ? 'Just now' : age < 48 ? Math.round(age)+'h ago' : Math.round(age/24)+'d ago';
+  const sevColor = s => s==='Critical'?'#dc2626':s==='High'?'#ea580c':s==='Medium'?'#ca8a04':'#16a34a';
+
+  // Threat level
+  const crit = ALERTS.filter(a=>a.sev==='Critical');
+  const high  = ALERTS.filter(a=>a.sev==='High');
+  const topCyber = CYBER.filter(c=>c.cvss>=9&&c.status==='Unpatched').slice(0,4);
+  const topConf  = CONFLICTS.slice(0,5);
+  const alertMkts = MARKETS.filter(m=>m.alert&&m.price!=='—').slice(0,8);
+  const milFl = flights.filter(f=>f.type==='military');
+  const tScore = (crit.length*3)+(high.length*1.5)+(topCyber.length*2)+(INFRA.filter(i=>i.status==='Critical'||i.status==='Stressed').length);
+  const tLevel = tScore>=15?{l:'CRITICAL',bg:'#dc2626'}:tScore>=8?{l:'HIGH',bg:'#ea580c'}:tScore>=4?{l:'ELEVATED',bg:'#ca8a04'}:{l:'GUARDED',bg:'#16a34a'};
+
+  // Masthead
+  const lvlEl = g('pr-level');
+  if (lvlEl) { lvlEl.textContent = '▲ THREAT: '+tLevel.l; lvlEl.style.background=tLevel.bg; lvlEl.style.color='#fff'; }
+  const refEl = g('pr-ref');
+  if (refEl) refEl.textContent = refId + ' · ' + utcStr.slice(0,25);
+
+  // Helper: compact row
+  const row = (title, detail, color='#111') =>
+    `<div style="padding:2px 0;border-bottom:1px solid #f1f5f9;line-height:1.3">
+      <span style="font-size:10px;font-weight:700;color:${color}">${title}</span>
+      ${detail ? `<div style="font-size:9px;color:#475569;margin-top:0">${detail.slice(0,120)}${detail.length>120?'…':''}</div>` : ''}
+    </div>`;
+
+  const badge = (txt, bg, color='#fff') =>
+    `<span style="background:${bg};color:${color};padding:0 4px;border-radius:2px;font-size:8px;font-weight:700;margin-left:4px;white-space:nowrap">${txt}</span>`;
+
+  const noData = txt => `<div style="color:#94a3b8;font-size:9px;padding:2px 0">${txt}</div>`;
+
+  // CRITICAL ALERTS
+  const critEl = g('pr-crit');
+  if (critEl) critEl.innerHTML = crit.length
+    ? crit.slice(0,4).map(a => row(a.title, a.detail, '#dc2626')).join('')
+    : noData('None at report time.');
+
+  // HIGH PRIORITY
+  const highEl = g('pr-high');
+  if (highEl) highEl.innerHTML = high.length
+    ? high.slice(0,3).map(a => row(a.title, null, '#ea580c')).join('')
+    : noData('None at report time.');
+
+  // CONFLICT THEATRES
+  const confEl = g('pr-conf');
+  if (confEl) confEl.innerHTML = topConf.length
+    ? topConf.map(c =>
+        `<div style="padding:2px 0;border-bottom:1px solid #f1f5f9;display:flex;align-items:baseline;gap:5px;flex-wrap:wrap">
+          <span style="font-size:10px;font-weight:700;color:#111">${c.region}</span>
+          ${badge(c.sev.toUpperCase(), sevColor(c.sev))}
+          ${c.type?`<span style="font-size:8.5px;color:#64748b">${c.type}</span>`:''}
+          ${c.detail?`<div style="font-size:8.5px;color:#475569;width:100%;margin-top:0">${c.detail.slice(0,110)}…</div>`:''}
+        </div>`).join('')
+    : noData('No active conflicts.');
+
+  // CYBER
+  const cyberEl = g('pr-cyber');
+  if (cyberEl) cyberEl.innerHTML = topCyber.length
+    ? topCyber.map(c =>
+        `<div style="padding:2px 0;border-bottom:1px solid #ede9fe;display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+          <span style="font-size:10px;font-weight:700;color:#111">${c.cve}</span>
+          ${badge('CVSS '+c.cvss,'#dc2626')}
+          ${c.kev?badge('EXPLOITED','#7c3aed'):''}
+          <span style="font-size:8.5px;color:#64748b;margin-left:auto">${c.sys||c.sector||'—'}</span>
+        </div>`).join('')
+    : noData('No critical unpatched CVEs.');
+
+  // MARKETS
+  const mktsEl = g('pr-mkts');
+  if (mktsEl) mktsEl.innerHTML = alertMkts.length
+    ? alertMkts.map(m =>
+        `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #f1f5f9">
+          <span style="font-size:9px;color:#334155;font-weight:600">${m.asset}</span>
+          <span style="font-size:9px;color:${m.up?'#16a34a':'#dc2626'};font-weight:700">${m.up?'▲':'▼'}${m.chg}%</span>
+        </div>`).join('')
+    : noData('No market alerts.');
+
+  // DOMAIN PICTURE
+  const domEl = g('pr-domain');
+  const lv = (l,v) => `<div style="display:flex;justify-content:space-between;padding:1px 0;border-bottom:1px solid #f8fafc"><span style="font-size:8.5px;color:#64748b">${l}</span><span style="font-size:8.5px;font-weight:700;color:#111">${v}</span></div>`;
+  if (domEl) domEl.innerHTML =
+    lv('Vessels',vessels.length) +
+    lv('Underway',vessels.filter(v=>v.status==='active').length) +
+    lv('Mil. Aircraft',milFl.length) +
+    lv('Cyber CVEs',CYBER.length) +
+    lv('Critical Infra',INFRA.filter(i=>i.status==='Critical').length) +
+    lv('Live Feeds',Object.values(FEED_STATUS).filter(f=>f.status==='live').length+'/'+Object.keys(FEED_STATUS).length);
+
+  // CORRELATIONS
+  runCorrelationEngine();
+  const corrEl = g('pr-corr');
+  if (corrEl) corrEl.innerHTML = CORRELATIONS.slice(0,4).length
+    ? CORRELATIONS.slice(0,4).map(c =>
+        `<div style="padding:2px 0;border-bottom:1px solid #cffafe">
+          <div style="font-size:9px;font-weight:700;color:#0891b2">${c.title}</div>
+          <div style="font-size:8.5px;color:#475569">${(c.detail||'').slice(0,100)}…</div>
+        </div>`).join('')
+    : noData('Insufficient data for correlation.');
+
+  // FOOTER
+  const ftEl = g('pr-footer');
+  if (ftEl) ftEl.textContent = refId + ' · ' + utcStr;
+}
+window.populateReport = populateReport;
+
 function printReport() {
-  const src = document.getElementById('report-printable');
+  const src  = document.getElementById('report-printable');
   const root = document.getElementById('pantheon-print-root');
   if (!src || !root) { window.print(); return; }
 
-  // Clone report into the dedicated print root at body level
+  // Re-populate with fresh data immediately before print
+  populateReport();
+
+  // Clone populated report into body-level print root
   root.innerHTML = src.outerHTML;
 
-  // Force the mobile nav bar to hide regardless of media query
   const mobileNav = document.getElementById('mobile-tab-bar');
-  const prevDisplay = mobileNav ? mobileNav.style.display : null;
-  if (mobileNav) mobileNav.style.setProperty('display', 'none', 'important');
-
-  // Add a temporary print class to body so @media print can target it
+  if (mobileNav) mobileNav.style.setProperty('display','none','important');
   document.body.classList.add('printing');
 
   window.print();
 
-  // Restore after dialog closes
   setTimeout(() => {
     root.innerHTML = '';
     document.body.classList.remove('printing');
-    if (mobileNav && prevDisplay !== null) mobileNav.style.display = prevDisplay;
+    if (mobileNav) mobileNav.style.removeProperty('display');
   }, 2000);
 }
 window.printReport = printReport;

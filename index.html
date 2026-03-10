@@ -2087,6 +2087,7 @@ async function fetchLiveVessels() {
   };
 
   fetched = Object.values(sources).flat();
+  netLog(`Pre-dedup vessel count: ${fetched.length} — sample: ${JSON.stringify(fetched[0]||{}).slice(0,120)}`);
 
   // Deduplicate by MMSI
   const seen = new Set();
@@ -2094,7 +2095,11 @@ async function fetchLiveVessels() {
     const key = v.mmsi !== '—' ? v.mmsi : v.id;
     if (seen.has(key)) return false;
     seen.add(key); return true;
-  }).filter(v => !isNaN(v.lat) && !isNaN(v.lng) && Math.abs(v.lat) <= 90 && Math.abs(v.lng) <= 180);
+  }).filter(v => {
+    const valid = !isNaN(v.lat) && !isNaN(v.lng) && Math.abs(v.lat) <= 90 && Math.abs(v.lng) <= 180;
+    if (!valid) netLog(`Filtered invalid vessel: lat=${v.lat} lng=${v.lng} name=${v.name}`);
+    return valid;
+  });
 
   const activeSources = Object.entries(sources).filter(([,v])=>v.length>0).map(([k,v])=>`${k}(${v.length})`).join(', ');
   netLog(`Live total: ${fetched.length} vessels — sources: ${activeSources || 'none'}`);

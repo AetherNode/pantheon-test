@@ -1205,21 +1205,21 @@ html,body{height:100%;overflow:hidden;background:var(--bg);font-family:var(--ui)
   display:flex;align-items:center;gap:6px;padding:4px 12px;
 }
 #tb-crit-scroll {
-  display:flex;gap:8px;padding:6px 10px 8px;
+  display:flex;gap:8px;padding:6px 10px 10px;
   overflow-x:auto;overflow-y:visible;scrollbar-width:none;
-  min-height:100px;
+  min-height:110px;max-height:150px;
 }
 #tb-crit-scroll::-webkit-scrollbar { display:none; }
 .tb-crit-card {
-  flex-shrink:0;width:260px;min-height:88px;
+  flex-shrink:0;width:280px;min-height:96px;
   background:rgba(244,63,94,.07);border:1px solid rgba(244,63,94,.3);
-  border-left:3px solid #f43f5e;border-radius:7px;padding:10px 13px;
+  border-left:3px solid #f43f5e;border-radius:7px;padding:11px 14px;
   cursor:pointer;transition:background .15s;
   display:flex;flex-direction:column;
 }
 .tb-crit-card:hover { background:rgba(244,63,94,.13); }
 .tb-crit-sector { font-size:9px;letter-spacing:1.4px;font-weight:700;margin-bottom:5px;display:flex;align-items:center;gap:5px;flex-shrink:0; }
-.tb-crit-title { font-size:13px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:4px;overflow-wrap:anywhere;word-break:break-word; }
+.tb-crit-title { font-size:13px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:5px;overflow-wrap:anywhere;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden; }
 .tb-crit-summary { font-size:11.5px;color:rgba(210,225,255,.65);line-height:1.45;margin-bottom:6px;flex:1;overflow-wrap:anywhere;word-break:break-word; }
 .tb-crit-meta { font-size:10px;color:rgba(244,63,94,.55);display:flex;gap:8px;align-items:center;flex-shrink:0;margin-top:auto; }
 
@@ -1228,7 +1228,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);font-family:var(--ui)
 
 /* ── LEFT: Conflict Theatres ── */
 #tb-left { width:44%;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,.05);overflow:hidden;min-width:280px; }
-#tb-theatre-list { flex:1;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:5px;scrollbar-width:thin;scrollbar-color:rgba(0,229,255,.15) transparent; }
+#tb-theatre-list { flex:1;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:5px;scrollbar-width:thin;scrollbar-color:rgba(0,229,255,.15) transparent;min-height:0; }
 
 .tb-theatre {
   border:1px solid rgba(255,255,255,.06);border-radius:7px;overflow:hidden;
@@ -1337,11 +1337,14 @@ html,body{height:100%;overflow:hidden;background:var(--bg);font-family:var(--ui)
 
 /* Detail overlay */
 #tb-detail-overlay {
-  position:absolute;inset:0;z-index:10;
-  background:rgba(1,5,16,.97);backdrop-filter:blur(16px);
+  position:fixed;right:0;top:0;bottom:0;
+  width:min(480px,90vw);z-index:300;
+  background:rgba(1,5,16,.99);backdrop-filter:blur(20px);
+  border-left:1px solid rgba(0,229,255,.15);
   display:none;flex-direction:column;
-  padding:24px 28px;overflow-y:auto;
+  padding:0;overflow-y:auto;
   animation:panelReveal .18s ease;
+  box-shadow:-8px 0 40px rgba(0,0,0,.7);
 }
 #tb-detail-overlay.open { display:flex; }
 .tb-det-stat { background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:12px 14px; }
@@ -1434,15 +1437,17 @@ html,body{height:100%;overflow:hidden;background:var(--bg);font-family:var(--ui)
 
     <!-- DETAIL OVERLAY -->
     <div id="tb-detail-overlay">
-      <button onclick="closeTbDetail()" style="align-self:flex-start;display:flex;align-items:center;gap:6px;background:rgba(0,229,255,.07);border:1px solid rgba(0,229,255,.18);color:rgba(0,229,255,.75);padding:6px 14px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:11px;margin-bottom:20px;flex-shrink:0">
+      <div style="padding:24px 24px 0;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0">
+      <button onclick="closeTbDetail()" style="align-self:flex-start;display:flex;align-items:center;gap:6px;background:rgba(0,229,255,.07);border:1px solid rgba(0,229,255,.18);color:rgba(0,229,255,.75);padding:6px 14px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:11px;margin-bottom:18px;flex-shrink:0">
         <svg width="12" height="10" viewBox="0 0 12 10" fill="none"><polyline points="5,1 1,5 5,9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="1" y1="5" x2="11" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         BACK TO BOARD
       </button>
       <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:8px;flex-shrink:0">
         <div id="tb-det-dot" style="width:12px;height:12px;border-radius:50%;flex-shrink:0;margin-top:4px"></div>
         <div style="flex:1;min-width:0">
-          <div id="tb-det-title" style="font-family:var(--mono);font-size:20px;font-weight:700;color:#fff;line-height:1.25;word-break:break-word"></div>
-          <div id="tb-det-sector" style="font-family:var(--mono);font-size:11px;letter-spacing:1.2px;margin-top:5px;opacity:.7"></div>
+          <div id="tb-det-title" style="font-family:var(--mono);font-size:18px;font-weight:700;color:#fff;line-height:1.25;word-break:break-word"></div>
+          <div id="tb-det-sector" style="font-family:var(--mono);font-size:11px;letter-spacing:1.2px;margin-top:4px;opacity:.7"></div>
+          <div id="tb-det-ts" style="font-family:var(--mono);font-size:10px;color:rgba(0,229,255,.4);margin-top:3px;letter-spacing:.5px"></div>
         </div>
         <span id="tb-det-sev" style="font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:5px;flex-shrink:0;letter-spacing:.8px"></span>
       </div>
@@ -1455,6 +1460,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);font-family:var(--ui)
         <button onclick="closeTbDetail();switchTab('CONFLICT')" style="font-family:var(--mono);font-size:11px;padding:8px 16px;background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.25);color:rgba(0,229,255,.85);border-radius:6px;cursor:pointer;letter-spacing:.6px">VIEW IN INTEL PANEL</button>
         <button onclick="closeTbDetail();switchTab('CYBER')" style="font-family:var(--mono);font-size:11px;padding:8px 16px;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.15);color:rgba(0,229,255,.6);border-radius:6px;cursor:pointer;letter-spacing:.6px">CYBER FEED</button>
       </div>
+      <div style="padding-bottom:30px"></div>
+      </div><!-- scrollable wrapper -->
     </div>
   </div><!-- /tb-main-body -->
 
@@ -1805,9 +1812,9 @@ const LIVE_CAMS = [
   {id:"cam6",  name:"TRT World",          loc:"Istanbul, Turkey",   lat:41.01,  lng:28.97,  type:"news",    col:"#fb923c", yt:"https://www.youtube.com/watch?v=f0lYkdA-Gtw"},
   {id:"cam7",  name:"Euronews",           loc:"Lyon, France",       lat:45.75,  lng:4.84,   type:"news",    col:"#00ffb3", yt:"https://www.youtube.com/watch?v=BOy2xDU1LC8"},
   {id:"cam8",  name:"NHK World Japan",    loc:"Tokyo, Japan",       lat:35.68,  lng:139.76, type:"news",    col:"#fbbf24", yt:"https://www.youtube.com/watch?v=iipR5yUp36o"},
-  {id:"cam9",  name:"CGTN English",       loc:"Beijing, China",     lat:39.91,  lng:116.39, type:"news",    col:"#f43f5e", yt:"https://www.youtube.com/watch?v=iEpJwprxDdk"},
+  {id:"cam9",  name:"CGTN English",       loc:"Beijing, China",     lat:39.91,  lng:116.39, type:"news",    col:"#f43f5e", yt:"https://www.youtube.com/watch?v=8gMPFJj6GCk"},
   {id:"cam10", name:"ABC News Live",      loc:"New York, USA",      lat:40.76,  lng:-73.99, type:"news",    col:"#00ffb3", yt:"https://www.youtube.com/watch?v=XWq5kBlakcQ"},
-  {id:"cam11", name:"Bloomberg TV",       loc:"New York, USA",      lat:40.71,  lng:-74.01, type:"news",    col:"#fbbf24", yt:"https://www.youtube.com/watch?v=vytmBNhc9ig"},
+  {id:"cam11", name:"Bloomberg TV",       loc:"New York, USA",      lat:40.71,  lng:-74.01, type:"news",    col:"#fbbf24", yt:"https://www.youtube.com/watch?v=dp8PhLsUcFE"},
   {id:"cam12", name:"CNA Singapore",      loc:"Singapore",          lat:1.35,   lng:103.82, type:"news",    col:"#00e5ff", yt:"https://www.youtube.com/watch?v=S7ONFV6Glfk"},
   {id:"cam13", name:"NASA TV",            loc:"Houston, USA",       lat:29.56,  lng:-95.09, type:"special", col:"#6a8fff", yt:"https://www.youtube.com/watch?v=nA9UZF-SZoQ"},
   {id:"cam14", name:"France 24 Arabic",   loc:"Paris, France",      lat:48.86,  lng:2.35,   type:"news",    col:"#0090d4", yt:"https://www.youtube.com/watch?v=UnFPSqxMtjA"},
@@ -1858,7 +1865,16 @@ const AC_DB = {
   "GLOBAL":{name:"Global Hawk",      engines:"1× AE3007", speed:"629 km/h",range:"22,780 km", ceiling:"60,000 ft",seats:"UAV",   img:"◎",  manufacturer:"Northrop",   family:"Global Hawk"},
 };
 
-function getAcDb(ac) { return AC_DB[ac] || {name:ac, engines:"—", speed:"—", range:"—", ceiling:"—", seats:"—", img:"✈", manufacturer:"—", family:"—"}; }
+function getAcDb(ac) {
+  if (AC_DB[ac]) return AC_DB[ac];
+  // Try partial match (e.g. "B77W" → B777)
+  const acUpper = (ac||'').toUpperCase();
+  const keys = Object.keys(AC_DB);
+  const partial = keys.find(k => acUpper.startsWith(k.slice(0,3)) || k.startsWith(acUpper.slice(0,3)));
+  if (partial) return {...AC_DB[partial], name: AC_DB[partial].name + ' (est.)'};
+  // Unknown type — show code itself
+  return {name: ac || 'Unknown Aircraft', engines:"—", speed:"—", range:"—", ceiling:"—", seats:"—", img:"✈", manufacturer:"—", family: ac || "—"};
+}
 
 // Airline colours for FR24-style callsign badges
 const AIRLINE_COLS = {
@@ -4390,11 +4406,18 @@ function showDetailPanel(type, data) {
 
     function acDiagram(ac) {
       const isFighter=['F16','F35'].includes(ac), isUAVac=['MQ9','GLOBAL'].includes(ac);
+      const isWideBody=['B777','B787','A380','A350','A350ULR','B767','A330'].includes(ac);
       const col=isMil||isFighter?'#ff8c00':isUAVac?'#00e5ff':'#3d8fe0';
-      if(isUAVac) return `<svg width="72" height="72" viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="9" ry="9" fill="${col}18" stroke="${col}33" stroke-width="0.5"/><path d="M10,3 L10.7,7 L10.7,14 L10,15.5 L9.3,14 L9.3,7Z" fill="${col}"/><path d="M2,9.8 L9.3,10.8 L9.3,12 L2,11Z" fill="${col}"/><path d="M18,9.8 L10.7,10.8 L10.7,12 L18,11Z" fill="${col}"/></svg>`;
-      if(isFighter) return `<svg width="72" height="72" viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="9" ry="9" fill="${col}18" stroke="${col}33" stroke-width="0.5"/><path d="M10,2 L11.5,7 L12,15 L10,17 L8,15 L8.5,7Z" fill="${col}"/><path d="M8.5,5 L3,13 L6,13 L9.2,8Z" fill="${col}"/><path d="M11.5,5 L17,13 L14,13 L10.8,8Z" fill="${col}"/></svg>`;
-      const ws=9;
-      return `<svg width="72" height="72" viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="9" ry="9" fill="${col}18" stroke="${col}33" stroke-width="0.5"/><path d="M10,2 L11,6 L11,16 L10,17.5 L9,16 L9,6Z" fill="${col}"/><path d="M9,7 L${10-ws+1},13 L${10-ws+2.5},13.5 L9.5,9Z" fill="${col}"/><path d="M11,7 L${10+ws-1},13 L${10+ws-2.5},13.5 L10.5,9Z" fill="${col}"/><path d="M9.2,13.5 L7.5,16.5 L9.2,16Z" fill="${col}" opacity=".7"/><path d="M10.8,13.5 L12.5,16.5 L10.8,16Z" fill="${col}" opacity=".7"/></svg>`;
+      const bg=`<ellipse cx="10" cy="10" rx="9" ry="9" fill="${col}14" stroke="${col}40" stroke-width="0.6"/>`;
+      // UAV — flying wing shape
+      if(isUAVac) return `<svg width="72" height="72" viewBox="0 0 20 20">${bg}<path d="M10,4 L10.8,8 L10.8,15 L10,16.5 L9.2,15 L9.2,8Z" fill="${col}"/><path d="M1.5,10.5 L9.2,11.5 L9.2,13 L1.5,12Z" fill="${col}"/><path d="M18.5,10.5 L10.8,11.5 L10.8,13 L18.5,12Z" fill="${col}"/><circle cx="10" cy="9" r="0.8" fill="${col}" opacity="0.6"/></svg>`;
+      // Fighter — swept delta wing
+      if(isFighter) return `<svg width="72" height="72" viewBox="0 0 20 20">${bg}<path d="M10,2 L11.6,7 L12,16 L10,17.5 L8,16 L8.4,7Z" fill="${col}"/><path d="M8.4,5.5 L2.5,14 L5.5,13.5 L9,9Z" fill="${col}"/><path d="M11.6,5.5 L17.5,14 L14.5,13.5 L11,9Z" fill="${col}"/><path d="M9.2,15 L8,18 L9.5,17Z" fill="${col}" opacity="0.7"/><path d="M10.8,15 L12,18 L10.5,17Z" fill="${col}" opacity="0.7"/></svg>`;
+      // Wide-body (4 engines for A380, 2 for rest)
+      if(ac==='A380') return `<svg width="72" height="72" viewBox="0 0 20 20">${bg}<path d="M10,2 L11.2,6 L11.2,17 L10,18.5 L8.8,17 L8.8,6Z" fill="${col}"/><path d="M8.8,7 L1,13 L2.5,13.5 L9,10Z" fill="${col}"/><path d="M11.2,7 L19,13 L17.5,13.5 L11,10Z" fill="${col}"/><path d="M8.8,8.5 L4,12 L5,12.3 L9,10Z" fill="${col}" opacity="0.7"/><path d="M11.2,8.5 L16,12 L15,12.3 L11,10Z" fill="${col}" opacity="0.7"/><rect x="8.5" y="15.5" width="3" height="1" rx="0.3" fill="${col}" opacity="0.8"/></svg>`;
+      if(isWideBody) return `<svg width="72" height="72" viewBox="0 0 20 20">${bg}<path d="M10,2 L11.2,6 L11.2,17 L10,18.5 L8.8,17 L8.8,6Z" fill="${col}"/><path d="M8.8,7 L1.5,12.5 L3,13 L9.1,9.5Z" fill="${col}"/><path d="M11.2,7 L18.5,12.5 L17,13 L10.9,9.5Z" fill="${col}"/><rect x="8.6" y="15.5" width="2.8" height="0.9" rx="0.3" fill="${col}" opacity="0.8"/><circle cx="5.2" cy="11.5" r="0.7" fill="${col}" opacity="0.6"/><circle cx="14.8" cy="11.5" r="0.7" fill="${col}" opacity="0.6"/></svg>`;
+      // Default narrow-body
+      return `<svg width="72" height="72" viewBox="0 0 20 20">${bg}<path d="M10,2.5 L11,6 L11,17 L10,18.5 L9,17 L9,6Z" fill="${col}"/><path d="M9,7 L2,13 L3.5,13.5 L9.5,9.5Z" fill="${col}"/><path d="M11,7 L18,13 L16.5,13.5 L10.5,9.5Z" fill="${col}"/><path d="M9.2,14 L7.5,16.8 L9.2,16.2Z" fill="${col}" opacity="0.7"/><path d="M10.8,14 L12.5,16.8 L10.8,16.2Z" fill="${col}" opacity="0.7"/><circle cx="6.5" cy="11.5" r="0.6" fill="${col}" opacity="0.6"/><circle cx="13.5" cy="11.5" r="0.6" fill="${col}" opacity="0.6"/></svg>`;
     }
 
     html=`<div style="font-family:var(--mono)">
@@ -4466,8 +4489,8 @@ function showDetailPanel(type, data) {
       <div style="padding:10px 12px;border-bottom:1px solid rgba(0,229,255,.07)">
         <div style="display:flex;align-items:center;gap:6px">
           <div style="flex:1;text-align:center">
-            <div style="color:#f1f5f9;font-size:19px;font-weight:900;
-              letter-spacing:1.5px;line-height:1">${f.fromName}</div>
+            <div style="color:#f1f5f9;font-size:15px;font-weight:900;
+              letter-spacing:0.5px;line-height:1.2;word-break:break-word">${(f.fromName&&f.fromName!=='—'&&f.fromName.length>0)?f.fromName:'ORIGIN'}</div>
             <div style="color:rgba(148,163,184,.82);font-size:10.5px;margin-top:2px">ORIGIN</div>
           </div>
           <div style="flex:2;padding:0 4px">
@@ -4488,8 +4511,8 @@ function showDetailPanel(type, data) {
             </div>
           </div>
           <div style="flex:1;text-align:center">
-            <div style="color:#f1f5f9;font-size:19px;font-weight:900;
-              letter-spacing:1.5px;line-height:1">${f.toName}</div>
+            <div style="color:#f1f5f9;font-size:15px;font-weight:900;
+              letter-spacing:0.5px;line-height:1.2;word-break:break-word">${(f.toName&&f.toName!=='—'&&f.toName!=='En Route')?f.toName:'EN ROUTE'}</div>
             <div style="color:rgba(148,163,184,.82);font-size:10.5px;margin-top:2px">DEST</div>
           </div>
         </div>
@@ -4666,7 +4689,7 @@ function renderNav(){
       <div style="width:5px;height:5px;border-radius:50%;background:#00ffb3;animation:pulse 2s infinite;box-shadow:0 0 5px #00ffb3"></div>
       <span id="utc-nav" style="color:rgba(0,229,255,.80);font-size:${isMob?'10':'11'}px;font-family:var(--mono)"></span>
     </div>
-    ${isMob?'':`<button onclick="quietMode=!quietMode;renderBanner()" title="Toggle alerts" style="background:transparent;border:1px solid rgba(0,229,255,.1);color:rgba(148,163,184,.85);width:30px;height:30px;border-radius:5px;font-size:16px;cursor:pointer;margin-left:6px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5C5 2 3.5 4 3.5 7v3h7V7C10.5 4 9 2 7 1.5z" stroke="currentColor" stroke-width="1.1" fill="none"/><line x1="5.5" y1="10" x2="8.5" y2="10" stroke="currentColor" stroke-width="1.1"/><path d="M5.5 10v1.5C5.5 12.3 6.2 13 7 13s1.5-.7 1.5-1.5V10" stroke="currentColor" stroke-width="1.1" fill="none"/></svg></button>`}`;
+    ${isMob?'':`<button onclick="quietMode=!quietMode;renderBanner();this.title=quietMode?'Alerts muted (click to unmute)':'Alerts active (click to mute');this.style.borderColor=quietMode?'rgba(255,77,77,.35)':'rgba(0,229,255,.1)';this.style.color=quietMode?'rgba(255,77,77,.55)':'rgba(148,163,184,.85)'" title="Toggle alert banner (currently active)" style="background:transparent;border:1px solid rgba(0,229,255,.1);color:rgba(148,163,184,.85);width:30px;height:30px;border-radius:5px;font-size:16px;cursor:pointer;margin-left:6px;transition:all .2s"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5C5 2 3.5 4 3.5 7v3h7V7C10.5 4 9 2 7 1.5z" stroke="currentColor" stroke-width="1.1" fill="none"/><line x1="5.5" y1="10" x2="8.5" y2="10" stroke="currentColor" stroke-width="1.1"/><path d="M5.5 10v1.5C5.5 12.3 6.2 13 7 13s1.5-.7 1.5-1.5V10" stroke="currentColor" stroke-width="1.1" fill="none"/></svg></button>`}`;
 }
 
 function renderTabs(){
@@ -8240,7 +8263,7 @@ ${[
   ["●","#ff6d00","HIGH CONFLICT ZONE"],
   ["✈","rgba(220,240,255,.85)","COMMERCIAL AIRCRAFT"],
   ["✈","#ff6d00","MILITARY AIRCRAFT"],
-
+  ["◎","#00e5ff","UAV / DRONE"],
   ["✦","#00ff88","HELICOPTER"],
   ["▲","#2979ff","CARGO / TANKER VESSEL"],
   ["▲","#ff1744","VESSEL — ALERT STATUS"],
@@ -8254,7 +8277,7 @@ ${[
   ["◈","#ffd700","SEVERE WEATHER ALERT (NOAA)"],
   ["◉","#ff2d55","HUMANITARIAN CRISIS (ReliefWeb)"],
   ["▶","#00e5ff","LIVE NEWS BROADCAST FEED"],
-  ["◆","#00e5ff","CAPITAL CITY"],
+  ["◆","#94a3b8","CAPITAL CITY"],
   ["·","rgba(0,229,255,.5)","CITY MARKER"],
 ].map(([ic,col,l])=>`<div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
   <span style="color:${col};font-size:${ic.length>1?'9':'8.5'}px;width:13px;text-align:center;text-shadow:0 0 6px ${col}">${ic}</span>
@@ -8543,13 +8566,16 @@ function selectEntityFromList(type, id, lat, lng) {
   if (lat && lng && Math.abs(lat) <= 90) {
     const targetRotX = Math.max(-85, Math.min(85, -lat));
     const targetRotY = -lng;
-    // Smooth spin to target
+    // Smooth spin to target with zoom
     const startX = rotX, startY = rotY;
+    const startR = R;
+    // Zoom to ~80% of max zoom level for good detail
+    const targetR = Math.min(W, H) * 0.70;
     const dX = targetRotX - startX;
     let dY = targetRotY - startY;
     while (dY > 180) dY -= 360;
     while (dY < -180) dY += 360;
-    const steps = 40;
+    const steps = 50;
     let step = 0;
     const ease = t => t < .5 ? 2*t*t : -1+(4-2*t)*t;
     const spin = () => {
@@ -8557,6 +8583,8 @@ function selectEntityFromList(type, id, lat, lng) {
       const t = ease(step / steps);
       rotX = startX + dX * t;
       rotY = startY + dY * t;
+      // Also zoom in smoothly
+      R = startR + (targetR - startR) * t;
       if (step < steps) requestAnimationFrame(spin);
     };
     autoRotate = false;
@@ -8564,7 +8592,7 @@ function selectEntityFromList(type, id, lat, lng) {
   }
   // Flash highlight on the entity
   globeHighlight = { type, id: String(id), pulse: 0 };
-  setTimeout(() => { globeHighlight = null; }, 3000);
+  setTimeout(() => { globeHighlight = null; }, 4000);
 }
 window.selectEntityFromList = selectEntityFromList;
 
@@ -9619,6 +9647,9 @@ function openTbDetail(encoded) {
       `<div class="tb-det-stat"><div class="tb-det-stat-label">${t.label}</div><div class="tb-det-stat-value" style="color:${t.col}">${t.label}</div></div>`
     ).join('');
     document.getElementById('tb-det-desc').textContent = item.desc || '—';
+    // Add timestamp
+    const ts = document.getElementById('tb-det-ts');
+    if (ts) ts.textContent = new Date().toUTCString().slice(0,25) + ' UTC';
     overlay.classList.add('open');
   } catch(e) { console.warn('TB detail error', e); }
 }
@@ -9969,21 +10000,35 @@ function tlSelectItem(id) {
   const metaEl  = document.getElementById('tl-det-meta');
   const badgeEl = document.getElementById('tl-det-badge');
   if (!strip) return;
-  if (dotEl) { dotEl.style.background = it.hex; dotEl.style.boxShadow = '0 0 6px '+it.hex; }
-  if (titleEl) titleEl.textContent = it.label;
+  if (dotEl) { dotEl.style.background = it.hex; dotEl.style.boxShadow = '0 0 8px '+it.hex; }
+  // Show full label from detail
+  const parts = it.detail.split(' · ').filter(Boolean);
+  const fullTitle = parts[0] || it.label;
+  if (titleEl) titleEl.textContent = fullTitle;
   const sevColors = { Critical:'#f43f5e', High:'#fb923c', Medium:'#fbbf24', Info:'#00ffb3' };
   const sevBg = { Critical:'rgba(244,63,94,.15)', High:'rgba(251,146,60,.12)', Medium:'rgba(251,191,36,.1)', Info:'rgba(0,255,179,.08)' };
   const sev = it.sev || 'Info';
   if (badgeEl) {
-    badgeEl.textContent = sev.toUpperCase();
-    badgeEl.style.cssText = `font-size:10px;padding:2px 8px;border-radius:3px;flex-shrink:0;font-family:var(--mono);font-weight:700;letter-spacing:.5px;background:${sevBg[sev]||sevBg.Info};color:${sevColors[sev]||'#00ffb3'};border:1px solid ${sevColors[sev]||'#00ffb3'}44`;
+    const grpName = ['CONFLICT','CYBER','NEWS'][it.group] || 'EVENT';
+    badgeEl.innerHTML = `<span style="font-size:10px;padding:2px 8px;border-radius:3px;font-family:var(--mono);font-weight:700;letter-spacing:.5px;background:${sevBg[sev]||sevBg.Info};color:${sevColors[sev]||'#00ffb3'};border:1px solid ${sevColors[sev]||'#00ffb3'}44;margin-right:4px">${sev.toUpperCase()}</span><span style="font-size:10px;padding:2px 8px;border-radius:3px;font-family:var(--mono);font-weight:700;letter-spacing:.5px;background:rgba(0,229,255,.07);color:rgba(0,229,255,.6);border:1px solid rgba(0,229,255,.2)">${grpName}</span>`;
   }
-  const parts = it.detail.split(' · ').filter(Boolean);
   const d = new Date(it.t);
   const timeStr = d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short',year:'numeric'})+' · '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' UTC';
-  const rows = parts.map(p => `<span style="display:inline-block;margin-right:12px;color:rgba(190,215,255,.85)">${p}</span>`).join('');
-  if (metaEl) metaEl.innerHTML = `<div style="color:rgba(0,229,255,.55);font-size:10px;margin-bottom:5px;letter-spacing:.3px">🕐 ${timeStr}</div><div style="line-height:1.8">${rows}</div>`;
+  // Build rich detail rows - skip first part since it's in title
+  const detailParts = parts.slice(1).filter(Boolean);
+  const rows = detailParts.map(p => `<div style="display:flex;align-items:baseline;gap:8px;padding:3px 0;border-bottom:1px solid rgba(0,229,255,.04)"><span style="color:rgba(148,163,184,.7);font-size:11.5px;line-height:1.5">${p}</span></div>`).join('');
+  if (metaEl) metaEl.innerHTML = `
+    <div style="color:rgba(0,229,255,.5);font-size:10px;margin-bottom:8px;letter-spacing:.5px;display:flex;align-items:center;gap:6px">
+      <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1.2"/><polyline points="6,3 6,6 8,7.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      ${timeStr}
+    </div>
+    ${rows || '<div style="color:rgba(148,163,184,.5);font-size:12px">No additional details available.</div>'}`;
   strip.style.display = 'block';
+  // Flash the item on globe if it has coords
+  if (it.id.startsWith('c_')) {
+    const c = CONFLICTS.find(c => 'c_'+c.id === it.id);
+    if (c && c.lat && c.lng) selectEntityFromList('conflict', c.id, c.lat, c.lng);
+  }
 }
 window.tlSelectItem = tlSelectItem;
 
@@ -10141,27 +10186,64 @@ function handleSearch(q) {
   }
 
   results.style.display='block';
+  // Store matches in window so onclick handlers can access them
+  window._searchMatches = sorted;
   results.innerHTML = `
     <div style="padding:6px 12px 4px;border-bottom:1px solid rgba(0,229,255,.07);display:flex;align-items:center;justify-content:space-between">
       <span style="color:rgba(0,229,255,.4);font-size:10px;font-family:var(--mono);letter-spacing:1px">${sorted.length} RESULTS · "${q}"</span>
-      <span style="color:rgba(0,229,255,.3);font-size:10px;font-family:var(--mono)">click to open</span>
+      <span style="color:rgba(0,229,255,.3);font-size:10px;font-family:var(--mono)">click to expand</span>
     </div>
     ${sorted.map((m,i)=>`
-    <div data-search-idx="${i}" onclick="(${m.action.toString()})();document.getElementById('global-search').style.display='none';"
+    <div data-search-idx="${i}"
+      onclick="handleSearchResultClick(${i})"
       style="padding:9px 14px;border-bottom:1px solid rgba(0,229,255,.05);cursor:pointer;display:flex;align-items:flex-start;gap:10px;transition:background .1s"
       onmouseover="this.style.background='rgba(0,229,255,.05)'" onmouseout="this.style.background='transparent'">
       <span style="color:${m.col};font-size:15px;flex-shrink:0;margin-top:1px">${m.icon}</span>
       <div style="flex:1;min-width:0">
         <div style="font-family:var(--mono);font-size:13px;color:rgba(240,246,255,.9);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.label}</div>
         <div style="font-family:var(--mono);font-size:11px;color:rgba(100,140,180,.75);margin-top:1px">${m.type} · ${m.sub}</div>
-        ${m.detail?`<div style="font-family:var(--mono);font-size:11px;color:rgba(100,140,180,.5);margin-top:3px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.detail}</div>`:''}
+        ${m.detail?`<div style="font-family:var(--mono);font-size:11px;color:rgba(100,140,180,.6);margin-top:3px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${m.detail}</div>`:''}
+        <div style="margin-top:5px;font-family:var(--mono);font-size:10px;color:rgba(0,229,255,.4);letter-spacing:.5px">↗ click to view full details</div>
       </div>
-      <span style="color:rgba(0,229,255,.25);font-size:12px;flex-shrink:0;margin-top:2px">→</span>
+      <span style="color:rgba(0,229,255,.35);font-size:14px;flex-shrink:0;margin-top:2px">›</span>
     </div>`).join('')}
     ${sorted.length===15?`<div style="padding:8px 14px;color:rgba(0,229,255,.3);font-size:11px;font-family:var(--mono);border-top:1px solid rgba(0,229,255,.05)">Showing top 15 — refine query to narrow</div>`:''}
   `;
 }
 window.handleSearch = handleSearch;
+
+function handleSearchResultClick(idx) {
+  const m = (window._searchMatches||[])[idx];
+  if (!m) return;
+  // Close search overlay
+  document.getElementById('global-search').style.display = 'none';
+  // Navigate to the correct tab
+  try { m.action(); } catch(e) {}
+  // Show full detail in modal
+  setTimeout(() => {
+    const colMap = {CONFLICT:'#fb923c',CYBER:'#00e5ff',NEWS:'#00ffb3',ALERT:'#f43f5e',VESSEL:'#2979ff',FLIGHT:'#60a5fa',MARKET:'#fbbf24'};
+    const col = colMap[m.type] || '#00e5ff';
+    let extra = '';
+    if (m.detail) extra = `<div style="margin-top:10px;padding:10px 12px;background:rgba(0,229,255,.03);border:1px solid rgba(0,229,255,.08);border-radius:6px;font-family:var(--mono);font-size:12.5px;color:rgba(200,220,255,.75);line-height:1.7">${m.detail}</div>`;
+    if (m.url) extra += `<div style="margin-top:10px"><a href="${m.url}" target="_blank" rel="noopener" style="color:rgba(0,229,255,.7);font-size:12px;font-family:var(--mono);text-decoration:none;background:rgba(0,229,255,.06);border:1px solid rgba(0,229,255,.2);padding:5px 12px;border-radius:5px;display:inline-block">↗ READ SOURCE</a></div>`;
+    modal(`${mHead('◎ ' + m.type + ' · SEARCH RESULT', col)}
+<div style="flex:1;overflow-y:auto;padding:18px;font-family:var(--mono)">
+  <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
+    <span style="color:${col};font-size:22px;flex-shrink:0">${m.icon}</span>
+    <div>
+      <div style="color:#fff;font-size:16px;font-weight:700;line-height:1.35;word-break:break-word">${m.label}</div>
+      <div style="color:rgba(148,163,184,.75);font-size:11.5px;margin-top:4px">${m.type} · ${m.sub}</div>
+    </div>
+  </div>
+  ${extra}
+  <div style="margin-top:14px;padding:10px 12px;background:rgba(0,229,255,.04);border-left:2px solid ${col};border-radius:0 5px 5px 0">
+    <div style="color:rgba(0,229,255,.5);font-size:10px;letter-spacing:1px;margin-bottom:4px">NAVIGATION</div>
+    <div style="color:rgba(200,220,255,.7);font-size:12px;">Tab <strong style="color:${col}">${m.type === 'FLIGHT' || m.type === 'VESSEL' ? 'LIVE' : m.type === 'MARKET' ? 'MARKETS' : m.type}</strong> has been opened with this result highlighted.</div>
+  </div>
+</div>`);
+  }, 150);
+}
+window.handleSearchResultClick = handleSearchResultClick;
 
 // ═══════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════

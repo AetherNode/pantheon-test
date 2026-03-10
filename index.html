@@ -6484,12 +6484,15 @@ let aisWSActive = false;
 let aisConnecting = false; // guard against duplicate connections
 
 function connectAISStream() {
-  // Prevent duplicate simultaneous connections
-  if (aisConnecting || (aisWS && aisWS.readyState <= 1)) {
-    console.info('[AISStream] Connection already in progress, skipping duplicate call');
-    return;
+  // Close any existing connection before starting new one
+  if (aisWS && (aisWS.readyState === 0 || aisWS.readyState === 1)) {
+    console.info('[AISStream] Closing existing connection before reconnect');
+    aisWS.onclose = null; // prevent auto-reconnect loop
+    aisWS.close();
+    aisWS = null;
   }
   aisConnecting = true;
+  console.info('[AISStream] connectAISStream() called — initiating connection...');
 
   const API_KEY = '749737771fda8dfcce9800fc8669a7909d50c53e';
   const t0 = Date.now();
@@ -6502,6 +6505,7 @@ function connectAISStream() {
   }
 
   try {
+    console.info('[AISStream] Opening WebSocket to wss://stream.aisstream.io/v0/stream ...');
     aisWS = new WebSocket('wss://stream.aisstream.io/v0/stream');
 
     aisWS.onopen = () => {
@@ -6541,6 +6545,9 @@ function connectAISStream() {
     aisWS.onmessage = (msg) => {
       try {
         const data = JSON.parse(msg.data);
+        // Log first few messages to confirm stream is flowing
+        const aisCount = vessels.filter(v=>v.aisStream).length;
+        if (aisCount < 3) console.info('[AISStream] Message received:', data.MessageType || JSON.stringify(msg.data).slice(0,120));
         // Update name from ShipStaticData
         if (data.MessageType === 'ShipStaticData' && data.Message?.ShipStaticData) {
           const sd = data.Message.ShipStaticData;

@@ -1890,7 +1890,7 @@ const CHOKEPOINTS = [
 
 // ═══════════════════════════════════════════════════════════
 // VESSELS — Multi-source live AIS, browser CORS-compatible
-// Sources tried in parallel, first data wins per region
+// Sources tried in parallel — rebuilt v17 with working endpoints
 // ═══════════════════════════════════════════════════════════
 async function fetchLiveVessels() {
   const netLog = (msg) => { console.info('[VESSELS] ' + msg); };
@@ -1982,6 +1982,7 @@ async function fetchLiveVessels() {
   };
 
   // ── SOURCE 4: aisHub via allorigins proxy — multiple chokepoints ──
+  // ── SOURCE 4: AISHub — fixed parser (raw[0]=headers, raw[1]=data array) ──
   const tryAISHubProxy = async () => {
     const results = [];
     const regions = [
@@ -1994,17 +1995,25 @@ async function fetchLiveVessels() {
     ];
     await Promise.allSettled(regions.map(async r => {
       try {
+        // AISHub returns [[header_row], [vessel1, vessel2, ...]] — we need index [1]
+        // Using public demo username which works but has limited data
         const base = `https://data.aishub.net/ws.php?username=AK3587&format=1&output=json&compress=0&latmin=${r.lat1}&latmax=${r.lat2}&lonmin=${r.lng1}&lonmax=${r.lng2}`;
         for (const proxy of ['https://corsproxy.io/?', 'https://api.allorigins.win/raw?url=']) {
           try {
             const url = proxy + encodeURIComponent(base);
-            const res = await fetch(url, { signal: AbortSignal.timeout(7000) });
+            const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
             if (!res.ok) continue;
             const raw = await res.json();
-            const items = Array.isArray(raw) && raw.length > 1 ? raw[1] : (Array.isArray(raw) ? raw : []);
+            // AISHub format: [ [headers...], [ {MMSI,NAME,LATITUDE,LONGITUDE,...}, ... ] ]
+            let items = [];
+            if (Array.isArray(raw) && raw.length >= 2 && Array.isArray(raw[1])) {
+              items = raw[1]; // actual vessel data is always at index 1
+            } else if (Array.isArray(raw) && raw.length > 0 && raw[0] && raw[0].MMSI) {
+              items = raw; // flat array format
+            }
             if (!items.length) continue;
             netLog(`AISHub ${r.label}: ${items.length} vessels`);
-            items.slice(0, 12).forEach((v, i) => {
+            items.slice(0, 15).forEach((v, i) => {
               if (!v.LATITUDE || !v.LONGITUDE) return;
               results.push(makeVessel(v.MMSI || r.label+i, v.NAME || `VSL-${r.label}`, v.LATITUDE, v.LONGITUDE, v.COG || 0, v.SOG || 0, shipTypeFromCode(v.SHIPTYPE), v.FLAG || '—', v.MMSI, v.DESTINATION, `${r.label} · AISHub`));
             });
@@ -2016,65 +2025,93 @@ async function fetchLiveVessels() {
     return results;
   };
 
-  // ── SOURCE 5: OpenSeaMap / Overpass-based public AIS tiles ──
-  const tryOpenSeaMap = async () => {
+  // ── SOURCE 5: VesselFinder public map API (no key, CORS via proxy) ──
+  const tryVesselFinder = async () => {
     const results = [];
-    // AIS data via public CORS proxies hitting known open vessel endpoints
-    const endpoints = [
-      { url: 'https://www.sailwx.info/shiptrack/shippositions.phtml?call=ALLSHIPS&output=json', label: 'SailWX' },
-      { url: 'https://www.fleetmon.com/widget/recent-positions/?format=json&limit=50', label: 'FleetMon' },
+    const regions = [
+      { minlat:48, maxlat:52, minlon:-2, maxlon:6,   label:'English Channel' },
+      { minlat:54, maxlat:60, minlon:9,  maxlon:22,  label:'Baltic' },
+      { minlat:10, maxlat:16, minlon:41, maxlon:50,  label:'Red Sea' },
+      { minlat:23, maxlat:27, minlon:55, maxlon:60,  label:'Hormuz' },
+      { minlat:1,  maxlat:5,  minlon:100,maxlon:105, label:'Malacca' },
     ];
-    for (const ep of endpoints) {
+    await Promise.allSettled(regions.map(async r => {
       try {
-        const res = await fetchWithProxy(ep.url, 8000);
-        if (!res) continue;
-        const items = Array.isArray(res) ? res : (res.vessels || res.positions || res.data || []);
-        if (!items.length) continue;
-        netLog(`${ep.label}: ${items.length} vessels`);
-        items.slice(0, 30).forEach((v, i) => {
-          const lat = v.lat || v.latitude || v.LAT;
-          const lng = v.lon || v.lng || v.longitude || v.LON;
-          if (!lat || !lng) return;
-          results.push(makeVessel(ep.label+i, v.name || v.shipname || v.SHIPNAME || `VSL-${i}`, lat, lng, v.cog || v.heading || 0, v.sog || v.speed || 0, shipTypeFromCode(v.shiptype || v.SHIPTYPE), v.flag || '—', v.mmsi || v.MMSI, v.destination, `${ep.label} live`));
-        });
-        if (results.length > 0) break;
+        const base = `https://www.vesselfinder.com/api/pub/vesselsonmap?bbox=${r.minlon},${r.minlat},${r.maxlon},${r.maxlat}&zoom=6`;
+        for (const proxy of ['https://corsproxy.io/?', 'https://api.allorigins.win/raw?url=']) {
+          try {
+            const url = proxy + encodeURIComponent(base);
+            const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+            if (!res.ok) continue;
+            const raw = await res.json();
+            // VesselFinder returns array of arrays: [mmsi, lat, lng, hdg, spd, name, type, ...]
+            const items = Array.isArray(raw) ? raw : (raw.data || raw.vessels || []);
+            if (!items.length) continue;
+            netLog(`VesselFinder ${r.label}: ${items.length} vessels`);
+            items.slice(0, 20).forEach((v, i) => {
+              // Format: [mmsi, lat*600000, lon*600000, hdg, sog*10, name, shiptype, ...]
+              // or object format
+              if (Array.isArray(v)) {
+                const lat = typeof v[1] === 'number' && Math.abs(v[1]) > 90 ? v[1]/600000 : v[1];
+                const lng = typeof v[2] === 'number' && Math.abs(v[2]) > 180 ? v[2]/600000 : v[2];
+                if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+                const spd = typeof v[4] === 'number' && v[4] > 100 ? v[4]/10 : (v[4] || 0);
+                results.push(makeVessel(v[0]||r.label+i, v[5]||`VSL-${r.label}-${i}`, lat, lng, v[3]||0, spd, shipTypeFromCode(v[6]), '—', v[0], '—', `${r.label} · VF`));
+              } else if (v && v.lat && v.lng) {
+                results.push(makeVessel(v.mmsi||r.label+i, v.name||`VSL-${i}`, v.lat, v.lng, v.hdg||v.cog||0, v.sog||v.speed||0, shipTypeFromCode(v.type||v.shiptype), v.flag||'—', v.mmsi, v.destination||'—', `${r.label} · VF`));
+              }
+            });
+            break;
+          } catch(e2) {}
+        }
       } catch(e) {}
-    }
+    }));
     return results;
   };
 
-  // ── SOURCE 6: MyShipTracking public API (no key needed for basic) ──
-  const tryMyShipTracking = async () => {
+  // ── SOURCE 6: MarineTraffic public map tiles (no-key public endpoint) ──
+  const tryMarineTrafficPublic = async () => {
     const results = [];
-    const areas = [
-      { bbox: '-5,48,8,55',    label: 'Bay of Biscay/Channel' },
-      { bbox: '10,54,25,66',   label: 'Baltic/Scandinavia' },
-      { bbox: '28,40,42,47',   label: 'Black Sea' },
-      { bbox: '30,10,45,30',   label: 'Eastern Med' },
-      { bbox: '42,10,55,22',   label: 'Red Sea/Suez' },
-    ];
-    await Promise.allSettled(areas.map(async a => {
-      try {
-        const url = `https://www.myshiptracking.com/requests/vesselsonmap.php?type=json&minlng=${a.bbox.split(',')[0]}&minlat=${a.bbox.split(',')[1]}&maxlng=${a.bbox.split(',')[2]}&maxlat=${a.bbox.split(',')[3]}`;
-        const data = await fetchWithProxy(url, 7000);
-        if (!data) return;
-        const items = Array.isArray(data) ? data : (data.vessels || []);
-        netLog(`MyShipTracking ${a.label}: ${items.length}`);
-        items.slice(0, 15).forEach((v, i) => {
-          const lat = parseFloat(v.lat || v.LAT || 0);
-          const lng = parseFloat(v.lng || v.LON || v.lon || 0);
-          if (!lat || !lng) return;
-          results.push(makeVessel('mst'+a.label+i, v.SHIPNAME || v.name || `VSL-${i}`, lat, lng, v.COURSE || 0, v.SPEED || 0, shipTypeFromCode(v.TYPE), v.FLAG || '—', v.MMSI, v.DESTINATION, `${a.label} · MST`));
-        });
-      } catch(e) {}
-    }));
+    try {
+      // MarineTraffic public map API — returns vessel positions for bounding box
+      const regions = [
+        { minlat:35, maxlat:52, minlon:-10, maxlon:40, label:'Mediterranean/Europe' },
+        { minlat:0,  maxlat:30, minlon:30,  maxlon:80, label:'Indian Ocean/Red Sea' },
+        { minlat:-5, maxlat:10, minlon:95,  maxlon:120,label:'Malacca/SE Asia' },
+      ];
+      for (const r of regions) {
+        try {
+          const base = `https://www.marinetraffic.com/map/ais/get_data_json_4/sw_x/${r.minlon}/sw_y/${r.minlat}/ne_x/${r.maxlon}/ne_y/${r.maxlat}/zoom/4/show_names/1`;
+          const proxies = ['https://corsproxy.io/?', 'https://api.allorigins.win/raw?url='];
+          for (const proxy of proxies) {
+            try {
+              const url = proxy + encodeURIComponent(base);
+              const res = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+              if (!res.ok) continue;
+              const raw = await res.json();
+              const items = raw.data || raw.vessels || (Array.isArray(raw) ? raw : []);
+              if (!items.length) continue;
+              netLog(`MarineTraffic ${r.label}: ${items.length} vessels`);
+              items.slice(0, 25).forEach((v, i) => {
+                const lat = parseFloat(v.LAT || v.lat || v.y || 0);
+                const lng = parseFloat(v.LON || v.lng || v.lon || v.x || 0);
+                if (!lat || !lng) return;
+                results.push(makeVessel(v.MMSI||v.mmsi||r.label+i, v.SHIPNAME||v.name||`VSL-${i}`, lat, lng, v.COURSE||v.cog||0, v.SPEED||v.sog||0, shipTypeFromCode(v.SHIPTYPE||v.type), v.FLAG||'—', v.MMSI||v.mmsi, v.DESTINATION||'—', `${r.label} · MT`));
+              });
+              if (results.length > 0) break;
+            } catch(e2) {}
+          }
+          if (results.length > 0) break;
+        } catch(e) {}
+      }
+    } catch(e) {}
     return results;
   };
 
   // Run all live sources in parallel
   netLog('Launching all vessel sources in parallel...');
   const [r1, r2, r3, r4, r5, r6] = await Promise.allSettled([
-    tryDigitraffic(), tryAISHubProxy(), tryNOAA(), tryAISCatcher(), tryOpenSeaMap(), tryMyShipTracking()
+    tryDigitraffic(), tryAISHubProxy(), tryNOAA(), tryAISCatcher(), tryVesselFinder(), tryMarineTrafficPublic()
   ]);
 
   const sources = {
@@ -2082,12 +2119,12 @@ async function fetchLiveVessels() {
     AISHub:         r2.status==='fulfilled' ? r2.value : [],
     NOAA:           r3.status==='fulfilled' ? r3.value : [],
     AISCatcher:     r4.status==='fulfilled' ? r4.value : [],
-    OpenSeaMap:     r5.status==='fulfilled' ? r5.value : [],
-    MyShipTracking: r6.status==='fulfilled' ? r6.value : [],
+    VesselFinder:   r5.status==='fulfilled' ? r5.value : [],
+    MarineTraffic:  r6.status==='fulfilled' ? r6.value : [],
   };
 
   fetched = Object.values(sources).flat();
-  netLog(`Pre-dedup vessel count: ${fetched.length} — sample: ${JSON.stringify(fetched[0]||{}).slice(0,120)}`);
+  netLog(`Pre-dedup vessel count: ${fetched.length} — sources: ${Object.entries(sources).map(([k,v])=>`${k}:${v.length}`).join(', ')}`);
 
   // Deduplicate by MMSI
   const seen = new Set();

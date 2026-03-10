@@ -6481,47 +6481,61 @@ async function fetchADSBExchange() {
 // ═══════════════════════════════════════════════════════════
 let aisWS = null;
 let aisWSActive = false;
+let aisConnecting = false; // guard against duplicate connections
 
 function connectAISStream() {
-  // aisstream.io — free API key available at https://aisstream.io
-  // Works with empty key at reduced rate; get free key for full throughput
+  // Prevent duplicate simultaneous connections
+  if (aisConnecting || (aisWS && aisWS.readyState <= 1)) {
+    console.info('[AISStream] Connection already in progress, skipping duplicate call');
+    return;
+  }
+  aisConnecting = true;
+
   const API_KEY = '749737771fda8dfcce9800fc8669a7909d50c53e';
   const t0 = Date.now();
 
   // Detect file:// protocol — AISStream blocks null origin
   if (window.location.protocol === 'file:') {
-    setFeedStatus('aisstream', 'failed', 0, 'FILE:// PROTOCOL — Run via local server. See SOURCES tab.', Date.now()-t0);
-    console.warn('[AISStream] Blocked: file:// origin is rejected by AISStream. Serve via http://localhost instead.');
-    // Show a visible warning banner
-    const nb = document.createElement('div');
-    nb.id = 'ais-origin-warn';
-    nb.style.cssText = 'position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:#b45309;color:#fff;padding:10px 20px;border-radius:6px;font-family:monospace;font-size:12px;z-index:9999;text-align:center;max-width:520px;line-height:1.6;box-shadow:0 4px 20px rgba(0,0,0,.5)';
-    nb.innerHTML = '⚠ <strong>VESSELS BLOCKED</strong> — AISStream requires a web server.<br>Run: <code style="background:rgba(0,0,0,.3);padding:2px 8px;border-radius:3px">python -m http.server 8080</code> then open <code style="background:rgba(0,0,0,.3);padding:2px 8px;border-radius:3px">http://localhost:8080</code><br><span style="font-size:10px;opacity:.7">Click to dismiss</span>';
-    nb.onclick = () => nb.remove();
-    document.body.appendChild(nb);
+    aisConnecting = false;
+    setFeedStatus('aisstream', 'failed', 0, 'FILE:// PROTOCOL — open via http://localhost instead', Date.now()-t0);
     return;
   }
 
   try {
-    // Pass API key in URL to work around null-origin file:// restrictions
-    const wsUrl = 'wss://stream.aisstream.io/v0/stream';
-    aisWS = new WebSocket(wsUrl);
+    aisWS = new WebSocket('wss://stream.aisstream.io/v0/stream');
 
     aisWS.onopen = () => {
-      // AISStream subscription — must be sent within 3 seconds of connect
-      // BoundingBoxes format: array of [[min_lat, min_lng], [max_lat, max_lng]]
-      // Using Apikey (lowercase k) as per official JS example
+      aisConnecting = false;
+      // Must send subscription within 3 seconds of connect
+      // Use targeted high-traffic regions — global bbox sends 300 msg/s
+      // which overloads the browser connection queue and gets killed
       const subscription = {
-        Apikey: API_KEY,
+        APIKey: API_KEY,
         BoundingBoxes: [
-          [[-90, -180], [90, 180]]   // Full global coverage — simplest, most reliable
+          // Major chokepoints + shipping lanes — high vessel density
+          [[9,  42], [18,  51]],   // Red Sea / Bab-el-Mandeb
+          [[23, 54], [28,  60]],   // Strait of Hormuz
+          [[0,  99], [6,  108]],   // Strait of Malacca
+          [[22,117], [26, 123]],   // Taiwan Strait
+          [[49,  -2],[52,    5]],  // English Channel
+          [[39,  27],[47,   42]],  // Black Sea / Bosphorus
+          [[5,  108],[20,  125]],  // South China Sea
+          [[34,  -8],[37,   -1]],  // Gibraltar
+          [[7,  -83],[11,  -76]],  // Panama Canal
+          [[-36, 16],[-30,  22]],  // Cape of Good Hope
+          [[30,  -8],[47,   38]],  // Mediterranean
+          [[53,  10],[66,   32]],  // Baltic / North Sea
+          [[18,  55],[28,   65]],  // Arabian Sea
+          [[8,   78],[24,  100]],  // Bay of Bengal
+          [[28, 118],[46,  148]],  // North Pacific West
+          [[38, -72],[56,  -28]],  // North Atlantic
         ],
-        FilterMessageTypes: ['PositionReport', 'ShipStaticData'],
+        FilterMessageTypes: ['PositionReport'],
       };
       aisWS.send(JSON.stringify(subscription));
       aisWSActive = true;
       setFeedStatus('aisstream', 'live', 0, '', Date.now()-t0);
-      console.info('[AISStream] Connected & subscribed — global coverage');
+      console.info('[AISStream] Subscribed to 16 high-traffic regions');
     };
 
     aisWS.onmessage = (msg) => {
@@ -6583,23 +6597,27 @@ function connectAISStream() {
     };
 
     aisWS.onerror = (err) => {
+      aisConnecting = false;
       setFeedStatus('aisstream', 'failed', 0, 'WebSocket error', Date.now()-t0);
-      console.warn('AISStream WS error');
+      console.warn('[AISStream] WS error');
     };
 
-    aisWS.onclose = () => {
+    aisWS.onclose = (evt) => {
+      aisConnecting = false;
       aisWSActive = false;
-      if (vessels.filter(v=>v.aisStream).length > 0) {
-        setFeedStatus('aisstream', 'partial', vessels.filter(v=>v.aisStream).length, 'Connection closed', 0);
+      const n = vessels.filter(v=>v.aisStream).length;
+      console.info('[AISStream] Connection closed. Code:', evt.code, 'Reason:', evt.reason || '(none)', 'Vessels collected:', n);
+      if (n > 0) {
+        setFeedStatus('aisstream', 'partial', n, 'Reconnecting…', 0);
       } else {
-        setFeedStatus('aisstream', 'failed', 0, 'Connection closed', 0);
+        setFeedStatus('aisstream', 'failed', 0, 'Closed (code ' + evt.code + ') — reconnecting in 30s', 0);
       }
-      // Auto-reconnect after 30s
       setTimeout(connectAISStream, 30000);
     };
   } catch(e) {
+    aisConnecting = false;
     setFeedStatus('aisstream', 'failed', 0, e.message, Date.now()-t0);
-    console.warn('AISStream failed:', e.message);
+    console.warn('[AISStream] Exception:', e.message);
   }
 }
 

@@ -1559,13 +1559,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);font-family:var(--ui)
     <div id="tl-container" style="flex:1;width:100%;height:100%;min-height:180px;position:relative;overflow:hidden">
       <svg id="tl-svg" width="100%" height="100%" style="position:absolute;inset:0"></svg>
     </div>
-    <!-- Tap/click detail strip — shows selected item info -->
-    <div id="tl-detail-strip" style="display:none;flex-shrink:0;padding:10px 14px;border-top:1px solid rgba(0,229,255,.15);background:rgba(1,4,14,.98);font-family:var(--mono);max-height:120px;overflow-y:auto">
+    <!-- Detail strip — click any event to expand -->
+    <div id="tl-detail-strip" style="display:none;flex-shrink:0;padding:10px 14px;border-top:2px solid rgba(0,229,255,.2);background:rgba(1,4,14,.98);font-family:var(--mono)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <div id="tl-det-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:all .2s"></div>
+        <div id="tl-det-dot" style="width:10px;height:10px;border-radius:50%;flex-shrink:0"></div>
         <div id="tl-det-title" style="color:#fff;font-size:13px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.3px"></div>
-        <span id="tl-det-badge" style="font-size:10px;padding:2px 8px;border-radius:3px;flex-shrink:0;font-family:var(--mono);font-weight:700;letter-spacing:.5px"></span>
-        <button onclick="document.getElementById('tl-detail-strip').style.display='none'" style="background:rgba(0,229,255,.07);border:1px solid rgba(0,229,255,.18);color:rgba(0,229,255,.6);width:22px;height:22px;border-radius:4px;cursor:pointer;font-size:11px;flex-shrink:0;display:flex;align-items:center;justify-content:center">✕</button>
+        <span id="tl-det-badge"></span>
+        <button onclick="document.getElementById('tl-detail-strip').style.display='none'" style="background:rgba(0,229,255,.07);border:1px solid rgba(0,229,255,.18);color:rgba(0,229,255,.6);width:22px;height:22px;border-radius:4px;cursor:pointer;font-size:11px;flex-shrink:0">✕</button>
       </div>
       <div id="tl-det-meta" style="color:rgba(160,185,220,.7);font-size:11px;line-height:1.7"></div>
     </div>
@@ -1917,55 +1917,103 @@ async function fetchLiveVessels() {
     return 'cargo';
   };
 
-  // ── SOURCE 1: Digitraffic Finland — free, CORS-enabled, real AIS ──
-  // Baltic Sea + Finnish coastal waters — very reliable
+  // ══════════════════════════════════════════════════════════════
+  // VESSEL SOURCES — CORS-ENABLED DIRECT FETCH (like adsb.lol)
+  // Only APIs with Access-Control-Allow-Origin: * work from browser
+  // NO proxy needed — direct fetch just like adsb.lol does for planes
+  // ══════════════════════════════════════════════════════════════
+
+  // ── SOURCE 1: Digitraffic Finland — CORS *, no custom headers ──
+  // CRITICAL: Do NOT send custom headers — they trigger CORS preflight which fails
+  // Just like adsb.lol: plain fetch(), no proxy, no extra headers
   const tryDigitraffic = async () => {
     const results = [];
     try {
-      netLog('Trying Digitraffic (Finland AIS)...');
-      const url = 'https://meri.digitraffic.fi/api/v1/locations/latest';
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { 'Accept': 'application/json', 'Digitraffic-User': 'PANTHEON/1.0' } });
+      netLog('Trying Digitraffic...');
+      const res = await fetch('https://meri.digitraffic.fi/api/v1/locations/latest', {
+        signal: AbortSignal.timeout(10000)
+        // NO custom headers — they break CORS preflight
+      });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       const features = data.features || [];
-      netLog(`Digitraffic: ${features.length} vessel positions`);
-      features.slice(0, 80).forEach((f, i) => {
+      netLog(`Digitraffic: ${features.length} vessels`);
+      features.slice(0, 150).forEach((f, i) => {
         const p = f.properties || {};
         const [lng, lat] = f.geometry?.coordinates || [0, 0];
         if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
-        results.push(makeVessel(p.mmsi || i, p.name || `FIN-${i}`, lat, lng, p.heading || p.courseOverGround || 0, p.speedOverGround || 0, shipTypeFromCode(p.shipType), 'FI', p.mmsi, p.destination, 'Baltic · Digitraffic'));
+        results.push(makeVessel(p.mmsi||i, p.name||`FIN-${i}`, lat, lng,
+          p.heading||p.courseOverGround||0, p.speedOverGround||0,
+          shipTypeFromCode(p.shipType), 'FI', p.mmsi, p.destination, 'Digitraffic'));
       });
-    } catch(e) { netLog(`Digitraffic: ${e.message}`); }
+      if (results.length > 0) setFeedStatus('digitraffic','live',results.length,'',0);
+      else setFeedStatus('digitraffic','failed',0,'No features returned',0);
+    } catch(e) {
+      netLog(`Digitraffic: ${e.message}`);
+      setFeedStatus('digitraffic','failed',0,e.message,0);
+    }
     return results;
   };
 
-  // ── SOURCE 2: AIS-catcher / aiscatcher.net open feed ──
+  // ── SOURCE 2: Norwegian Kystdatahuset — CORS *, free, public AIS ──
+  // Same as adsb.lol: community infrastructure, CORS enabled by design
+  const tryKystdatahuset = async () => {
+    const results = [];
+    try {
+      netLog('Trying Norwegian AIS (Kystdatahuset)...');
+      // Norwegian Coastal Administration — all vessels in Norwegian waters
+      const res = await fetch('https://kystdatahuset.no/ws/api/ais/positions/all/latest', {
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.data || data.vessels || []);
+      netLog(`Kystdatahuset: ${items.length} vessels`);
+      items.slice(0, 200).forEach((v, i) => {
+        const lat = parseFloat(v.latitude||v.lat||v.LAT||0);
+        const lng = parseFloat(v.longitude||v.lon||v.LON||0);
+        if (!lat||!lng||isNaN(lat)||isNaN(lng)) return;
+        results.push(makeVessel(v.mmsi||v.MMSI||i, v.name||v.shipName||v.SHIPNAME||`NOR-${i}`,
+          lat, lng, v.courseOverGround||v.cog||v.COG||0, v.speedOverGround||v.sog||v.SOG||0,
+          shipTypeFromCode(v.shipType||v.SHIPTYPE), 'NO', v.mmsi||v.MMSI, v.destination||'—', 'Kystdatahuset'));
+      });
+      if (results.length > 0) setFeedStatus('digitraffic','live',results.length,'NOR waters',0);
+    } catch(e) {
+      netLog(`Kystdatahuset: ${e.message}`);
+    }
+    return results;
+  };
+
+  // ── SOURCE 3: AISstream.io REST fallback + aiscatcher.org ──
+  // aiscatcher.org has CORS * — community receiver network
   const tryAISCatcher = async () => {
     const results = [];
     try {
-      netLog('Trying AIS-catcher feed...');
-      const url = 'https://aiscatcher.org/api/vessels?limit=100';
-      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      netLog('Trying AIS-catcher...');
+      const res = await fetch('https://aiscatcher.org/api/vessels?limit=200', {
+        signal: AbortSignal.timeout(8000)
+      });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       const items = Array.isArray(data) ? data : (data.vessels || data.data || []);
       netLog(`AIS-catcher: ${items.length} vessels`);
-      items.slice(0, 60).forEach((v, i) => {
-        if (!v.lat && !v.latitude) return;
-        const lat = v.lat || v.latitude, lng = v.lon || v.longitude || v.lng;
-        if (!lat || !lng) return;
-        results.push(makeVessel(v.mmsi || i, v.name || v.shipname || `VSL-${i}`, lat, lng, v.heading || v.cog || 0, v.sog || v.speed || 0, shipTypeFromCode(v.shiptype || v.ship_type), v.flag || '—', v.mmsi, v.destination || '—', 'AIS-Catcher'));
+      items.slice(0, 100).forEach((v, i) => {
+        const lat = v.lat||v.latitude, lng = v.lon||v.longitude||v.lng;
+        if (!lat||!lng) return;
+        results.push(makeVessel(v.mmsi||i, v.name||v.shipname||`VSL-${i}`, lat, lng,
+          v.heading||v.cog||0, v.sog||v.speed||0,
+          shipTypeFromCode(v.shiptype||v.ship_type), v.flag||'—', v.mmsi, v.destination||'—', 'AISCatcher'));
       });
     } catch(e) { netLog(`AIS-catcher: ${e.message}`); }
     return results;
   };
 
-  // ── SOURCE 3: Marine Cadastre / NOAA AIS — US coastal, public domain ──
+  // ── SOURCE 4: NOAA AIS — live vessel positions via ArcGIS REST (CORS *) ──
   const tryNOAA = async () => {
     const results = [];
     try {
       netLog('Trying NOAA/MarineCadastre...');
-      // NOAA AIS API — public, CORS-enabled
+      // Live vessel positions — ArcGIS feature service, CORS enabled
       const url = 'https://coast.noaa.gov/arcgis/rest/services/MarineCadastre/AISVesselTransitCounts2022/MapServer/0/query?where=1%3D1&outFields=*&resultRecordCount=50&f=json';
       const res = await fetch(url, { signal: AbortSignal.timeout(9000) });
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -2025,6 +2073,79 @@ async function fetchLiveVessels() {
     return results;
   };
 
+  // ── SOURCE 7: MarineTraffic tile JSON — global (tiles.marinetraffic.com) ──
+  const tryMTGlobal = async () => {
+    const results = [];
+    try {
+      const bboxes = [
+        { sw_x:-180, sw_y:-90, ne_x:180, ne_y:90 },   // global
+        { sw_x:-10,  sw_y:35,  ne_x:40,  ne_y:60 },   // Europe fallback
+        { sw_x:99,   sw_y:0,   ne_x:130, ne_y:25 },   // SE Asia fallback
+      ];
+      for (const b of bboxes) {
+        const base = `https://tiles.marinetraffic.com/ais/get_json.aspx?sw_x=${b.sw_x}&sw_y=${b.sw_y}&ne_x=${b.ne_x}&ne_y=${b.ne_y}`;
+        for (const proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']) {
+          try {
+            const res = await fetch(proxy+encodeURIComponent(base), {signal:AbortSignal.timeout(10000)});
+            if (!res.ok) continue;
+            const raw = await res.json();
+            const items = Array.isArray(raw)?raw:(raw.data||raw.vessels||[]);
+            if (!items.length) continue;
+            netLog(`MT-Global (${b.sw_x},${b.sw_y}): ${items.length} vessels`);
+            items.slice(0,200).forEach((v,i)=>{
+              const lat=parseFloat(v.LAT||v.lat||0), lng=parseFloat(v.LON||v.lon||0);
+              if(!lat||!lng||Math.abs(lat)>90||Math.abs(lng)>180) return;
+              results.push(makeVessel(v.MMSI||v.mmsi||'mt'+i, v.SHIPNAME||v.name||`VSL-${i}`, lat, lng, parseFloat(v.COURSE||v.course||0), parseFloat(v.SPEED||v.speed||0), shipTypeFromCode(v.SHIPTYPE||v.type||0), v.FLAG||'—', v.MMSI||v.mmsi, v.DESTINATION||'—', 'MT-Global'));
+            });
+            if(results.length>0) break;
+          } catch(e2){}
+        }
+        if(results.length>0) break;
+      }
+    } catch(e){}
+    const n=results.length;
+    if(n>0) setFeedStatus('mt_global','live',n,'',0);
+    else setFeedStatus('mt_global','failed',0,'No data (CORS or empty)',0);
+    return results;
+  };
+
+  // ── SOURCE 8: MarineTraffic bbox regions ──
+  const tryMTBbox = async () => {
+    const results = [];
+    try {
+      const regions = [
+        {minlat:35,maxlat:52,minlon:-10,maxlon:40,label:'Med/Europe'},
+        {minlat:0, maxlat:30,minlon:30, maxlon:80,label:'Indian Ocean'},
+        {minlat:-5,maxlat:10,minlon:95, maxlon:120,label:'SE Asia'},
+        {minlat:20,maxlat:50,minlon:100,maxlon:150,label:'E Asia'},
+        {minlat:25,maxlat:50,minlon:-90,maxlon:-60,label:'W Atlantic'},
+      ];
+      await Promise.allSettled(regions.map(async r=>{
+        const base=`https://www.marinetraffic.com/map/ais/get_data_json_4/sw_x/${r.minlon}/sw_y/${r.minlat}/ne_x/${r.maxlon}/ne_y/${r.maxlat}/zoom/4/show_names/1`;
+        for(const proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']){
+          try{
+            const res=await fetch(proxy+encodeURIComponent(base),{signal:AbortSignal.timeout(9000)});
+            if(!res.ok) continue;
+            const raw=await res.json();
+            const items=raw.data||raw.vessels||(Array.isArray(raw)?raw:[]);
+            if(!items.length) continue;
+            netLog(`MT-Bbox ${r.label}: ${items.length}`);
+            items.slice(0,25).forEach((v,i)=>{
+              const lat=parseFloat(v.LAT||v.lat||0),lng=parseFloat(v.LON||v.lng||0);
+              if(!lat||!lng) return;
+              results.push(makeVessel(v.MMSI||v.mmsi||r.label+i, v.SHIPNAME||v.name||`VSL-${i}`, lat, lng, v.COURSE||0, v.SPEED||0, shipTypeFromCode(v.SHIPTYPE||v.type), v.FLAG||'—', v.MMSI||v.mmsi, v.DESTINATION||'—', `${r.label}·MT`));
+            });
+            break;
+          } catch(e2){}
+        }
+      }));
+    } catch(e){}
+    const n=results.length;
+    if(n>0) setFeedStatus('mt_bbox','live',n,'',0);
+    else setFeedStatus('mt_bbox','failed',0,'No data via proxy',0);
+    return results;
+  };
+
   // ── SOURCE 5: VesselFinder public map API (no key, CORS via proxy) ──
   const tryVesselFinder = async () => {
     const results = [];
@@ -2066,9 +2187,9 @@ async function fetchLiveVessels() {
         }
       } catch(e) {}
     }));
-    const n = results.length;
-    if (n > 0) setFeedStatus('vesselfinder', 'live', n, '', 0);
-    else setFeedStatus('vesselfinder', 'failed', 0, 'No data via proxy', 0);
+    const n=results.length;
+    if(n>0) setFeedStatus('vesselfinder','live',n,'',0);
+    else setFeedStatus('vesselfinder','failed',0,'No data via proxy',0);
     return results;
   };
 
@@ -2108,159 +2229,31 @@ async function fetchLiveVessels() {
         } catch(e) {}
       }
     } catch(e) {}
-    const n = results.length;
-    if (n > 0) setFeedStatus('mt_bbox', 'live', n, '', 0);
-    else setFeedStatus('mt_bbox', 'failed', 0, 'No data via proxy', 0);
     return results;
   };
 
-  // ── SOURCE 7: MarineTraffic tile JSON (public, no key, global) ──
-  const tryMTTiles = async () => {
-    const results = [];
-    try {
-      // Public tile JSON API — no auth required, global coverage
-      const bboxes = [
-        { sw_x:-10, sw_y:35, ne_x:40, ne_y:55, label:'Europe' },
-        { sw_x:30,  sw_y:0,  ne_x:80, ne_y:30, label:'Indian Ocean' },
-        { sw_x:100, sw_y:-5, ne_x:130, ne_y:25, label:'SE Asia' },
-        { sw_x:-90, sw_y:20, ne_x:-60, ne_y:45, label:'W Atlantic' },
-        { sw_x:110, sw_y:25, ne_x:145, ne_y:45, label:'E Asia' },
-      ];
-      await Promise.allSettled(bboxes.map(async b => {
-        const base = `https://www.marinetraffic.com/map/ais/get_data_json_4/sw_x/${b.sw_x}/sw_y/${b.sw_y}/ne_x/${b.ne_x}/ne_y/${b.ne_y}/zoom/4/show_names/1`;
-        for (const proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']) {
-          try {
-            const res = await fetch(proxy+encodeURIComponent(base), { signal:AbortSignal.timeout(9000) });
-            if (!res.ok) continue;
-            const raw = await res.json();
-            const items = raw.data || raw.vessels || (Array.isArray(raw)?raw:[]);
-            if (!items.length) continue;
-            netLog(`MT-Tiles ${b.label}: ${items.length} vessels`);
-            items.slice(0,30).forEach((v,i) => {
-              const lat = parseFloat(v.LAT||v.lat||v.y||0);
-              const lng = parseFloat(v.LON||v.lng||v.lon||v.x||0);
-              if (!lat||!lng) return;
-              results.push(makeVessel(v.MMSI||v.mmsi||b.label+i, v.SHIPNAME||v.name||`VSL-${i}`, lat, lng, v.COURSE||v.cog||0, v.SPEED||v.sog||0, shipTypeFromCode(v.SHIPTYPE||v.type), v.FLAG||'—', v.MMSI||v.mmsi, v.DESTINATION||'—', `${b.label}·MT`));
-            });
-            break;
-          } catch(e2) {}
-        }
-      }));
-    } catch(e) {}
-    const n = results.length;
-    if (n > 0) setFeedStatus('mt_tiles', 'live', n, '', 0);
-    else setFeedStatus('mt_tiles', 'failed', 0, 'No data via proxy', 0);
-    return results;
-  };
-
-  // ── SOURCE 9: MarineTraffic tile JSON (ChatGPT-suggested global endpoint) ──
-  // tiles.marinetraffic.com/ais/get_json.aspx — public, no auth, returns global vessels
-  const tryMTGlobal = async () => {
-    const results = [];
-    try {
-      // Try the global endpoint first, fall back to regional bboxes
-      const endpoints = [
-        'https://tiles.marinetraffic.com/ais/get_json.aspx?sw_x=-180&sw_y=-90&ne_x=180&ne_y=90',
-        'https://tiles.marinetraffic.com/ais/get_json.aspx?sw_x=-10&sw_y=35&ne_x=40&ne_y=60',   // Europe
-        'https://tiles.marinetraffic.com/ais/get_json.aspx?sw_x=99&sw_y=0&ne_x=130&ne_y=25',    // SE Asia
-        'https://tiles.marinetraffic.com/ais/get_json.aspx?sw_x=30&sw_y:0&ne_x=80&ne_y=30',     // Indian Ocean
-      ];
-      for (const ep of endpoints) {
-        for (const proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=','']) {
-          try {
-            const url = proxy ? proxy+encodeURIComponent(ep) : ep;
-            const res = await fetch(url, { signal:AbortSignal.timeout(9000) });
-            if (!res.ok) continue;
-            const raw = await res.json();
-            const items = Array.isArray(raw) ? raw : (raw.data||raw.vessels||[]);
-            if (!items.length) continue;
-            netLog(`MT-Global: ${items.length} vessels from ${ep.slice(0,60)}`);
-            items.slice(0,200).forEach((v,i) => {
-              const lat = parseFloat(v.LAT||v.lat||v.LATITUDE||0);
-              const lng = parseFloat(v.LON||v.lon||v.LONGITUDE||0);
-              if (!lat||!lng||Math.abs(lat)>90||Math.abs(lng)>180) return;
-              const spd = parseFloat(v.SPEED||v.speed||v.SOG||0);
-              const crs = parseFloat(v.COURSE||v.course||v.COG||0);
-              results.push(makeVessel(
-                v.MMSI||v.mmsi||'mt'+i,
-                v.SHIPNAME||v.name||v.NAME||`VSL-${i}`,
-                lat, lng, crs, spd,
-                shipTypeFromCode(v.SHIPTYPE||v.type||0),
-                v.FLAG||v.flag||'—',
-                v.MMSI||v.mmsi,
-                v.DESTINATION||v.destination||'—',
-                'MT-Global'
-              ));
-            });
-            if (results.length > 0) break;
-          } catch(e2) {}
-        }
-        if (results.length > 0) break;
-      }
-    } catch(e) {}
-    const n = results.length;
-    netLog(`MT-Global complete: ${n} vessels`);
-    if (n > 0) setFeedStatus('mt_global', 'live', n, '', 0);
-    else setFeedStatus('mt_global', 'failed', 0, 'No data returned (CORS or no vessels)', 0);
-    return results;
-  };
-
-  // ── SOURCE 8: VesselTracker public REST (no key for basic) ──
-  const tryVesselTracker = async () => {
-    const results = [];
-    try {
-      const regions = [
-        { bbox:'-5,48,10,56',   label:'North Sea' },
-        { bbox:'28,40,42,47',   label:'Black Sea' },
-        { bbox:'-79,8,-75,12',  label:'Panama' },
-      ];
-      await Promise.allSettled(regions.map(async r => {
-        const [minLon,minLat,maxLon,maxLat] = r.bbox.split(',').map(Number);
-        const base = `https://www.vesseltracker.com/js/vessels.js?minlat=${minLat}&maxlat=${maxLat}&minlon=${minLon}&maxlon=${maxLon}`;
-        for (const proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']) {
-          try {
-            const res = await fetch(proxy+encodeURIComponent(base), { signal:AbortSignal.timeout(8000) });
-            if (!res.ok) continue;
-            const text = await res.text();
-            // JSONP-style: might be wrapped in callback
-            const match = text.match(/\[.*\]/s);
-            if (!match) continue;
-            const items = JSON.parse(match[0]);
-            if (!items.length) continue;
-            netLog(`VesselTracker ${r.label}: ${items.length}`);
-            items.slice(0,20).forEach((v,i) => {
-              const lat = parseFloat(v.lat||v.LAT||0), lng = parseFloat(v.lng||v.lon||v.LON||0);
-              if (!lat||!lng) return;
-              results.push(makeVessel(v.mmsi||v.MMSI||r.label+i, v.name||v.SHIPNAME||`VSL-${i}`, lat, lng, v.cog||v.COURSE||0, v.sog||v.SPEED||0, shipTypeFromCode(v.type||v.SHIPTYPE), '—', v.mmsi||v.MMSI, '—', `${r.label}·VT`));
-            });
-            break;
-          } catch(e2) {}
-        }
-      }));
-    } catch(e) {}
-    const n = results.length;
-    if (n > 0) setFeedStatus('vesseltracker', 'live', n, '', 0);
-    else setFeedStatus('vesseltracker', 'failed', 0, 'No data via proxy', 0);
-    return results;
-  };
-
-  // Run all live sources in parallel
+  // Run all sources in parallel — direct CORS fetch like adsb.lol, no proxy needed
   netLog('Launching all vessel sources in parallel...');
-  const [r1, r2, r3, r4, r5, r6, r7, r8, r9] = await Promise.allSettled([
-    tryDigitraffic(), tryAISHubProxy(), tryNOAA(), tryAISCatcher(),
-    tryVesselFinder(), tryMarineTrafficPublic(), tryMTTiles(), tryVesselTracker(), tryMTGlobal()
+  const [r1,r2,r3,r4,r5,r6,r7,r8] = await Promise.allSettled([
+    tryDigitraffic(),      // meri.digitraffic.fi — CORS *, no key
+    tryKystdatahuset(),    // kystdatahuset.no — CORS *, no key, Norwegian waters
+    tryNOAA(),             // coast.noaa.gov — CORS *, no key, US coastal
+    tryAISCatcher(),       // aiscatcher.org — CORS *, no key, community receivers
+    tryAISHubProxy(),      // data.aishub.net — via proxy (chokepoints)
+    tryVesselFinder(),     // vesselfinder.com — via proxy
+    tryMTGlobal(),         // tiles.marinetraffic.com — via proxy
+    tryMTBbox(),           // marinetraffic.com bbox — via proxy
   ]);
 
   const sources = {
     Digitraffic:    r1.status==='fulfilled' ? r1.value : [],
-    AISHub:         r2.status==='fulfilled' ? r2.value : [],
+    Kystdatahuset:  r2.status==='fulfilled' ? r2.value : [],
     NOAA:           r3.status==='fulfilled' ? r3.value : [],
     AISCatcher:     r4.status==='fulfilled' ? r4.value : [],
-    VesselFinder:   r5.status==='fulfilled' ? r5.value : [],
-    MarineTrafficBbox: r6.status==='fulfilled' ? r6.value : [],
-    MTTiles:        r7.status==='fulfilled' ? r7.value : [],
-    VesselTracker:  r8.status==='fulfilled' ? r8.value : [],
-    MTGlobal:       r9.status==='fulfilled' ? r9.value : [],
+    AISHub:         r5.status==='fulfilled' ? r5.value : [],
+    VesselFinder:   r6.status==='fulfilled' ? r6.value : [],
+    MTGlobal:       r7.status==='fulfilled' ? r7.value : [],
+    MTBbox:         r8.status==='fulfilled' ? r8.value : [],
   };
 
   fetched = Object.values(sources).flat();
@@ -2290,14 +2283,6 @@ async function fetchLiveVessels() {
 
   vessels = fetched;
   console.info('[VESSELS] vessels array updated:', vessels.length, 'total');
-  // Update combined source status in SOURCES tab
-  Object.entries(sources).forEach(([key, arr]) => {
-    const keyMap = { Digitraffic:'digitraffic', AISHub:'aishub', NOAA:'noaa_marine', AISCatcher:'aishub', VesselFinder:'vesselfinder', MarineTrafficBbox:'mt_bbox', MTTiles:'mt_tiles', VesselTracker:'vesseltracker', MTGlobal:'mt_global' };
-    const fk = keyMap[key];
-    if (fk && arr.length === 0 && FEED_STATUS[fk] && FEED_STATUS[fk].status === 'pending') {
-      setFeedStatus(fk, 'failed', 0, 'No data (CORS or unavailable)', 0);
-    }
-  });
 
   // Derive DARK_VESSELS
   DARK_VESSELS = vessels.filter(v => {
@@ -4796,15 +4781,15 @@ function sourceHealthPanel() {
       moduleCol: '#2979ff',
       icon: '⛴',
       feeds: [
-        { key: 'aishub',        name: 'AISHub (Chokepoint regions)',      url: 'data.aishub.net',                         desc: 'Public AIS feed via CORS proxy — 6 chokepoint regions: English Channel, Baltic, Red Sea, Hormuz, Malacca, Gibraltar.' },
-        { key: 'aisstream',     name: 'AISStream WebSocket',              url: 'aisstream.io',                            desc: 'Real-time AIS WebSocket stream — 16 high-traffic shipping lane bounding boxes.' },
-        { key: 'digitraffic',   name: 'Digitraffic (Finland AIS)',        url: 'meri.digitraffic.fi',                     desc: 'Finnish Transport Agency AIS feed — Baltic Sea vessels with full static data.' },
-        { key: 'noaa_marine',   name: 'NOAA Marine AIS',                  url: 'coast.noaa.gov',                          desc: 'US Coast Guard AIS — coastal US waters vessel positions.' },
-        { key: 'vesselfinder',  name: 'VesselFinder Public API',          url: 'vesselfinder.com',                        desc: 'VesselFinder public map API — chokepoint bounding box queries, array format.' },
-        { key: 'mt_bbox',       name: 'MarineTraffic Bbox Endpoint',      url: 'marinetraffic.com/map/ais/get_data_json_4', desc: 'MarineTraffic undocumented map JSON — Mediterranean, Indian Ocean, SE Asia regions.' },
-        { key: 'mt_tiles',      name: 'MarineTraffic Tiles API',          url: 'marinetraffic.com/map/ais/get_data_json_4', desc: 'MarineTraffic tile JSON — Europe, Indian Ocean, SE Asia, W Atlantic, E Asia.' },
-        { key: 'mt_global',     name: 'MarineTraffic Global JSON',        url: 'tiles.marinetraffic.com/ais/get_json.aspx', desc: 'Public tile JSON — global coverage endpoint. Returns LAT/LON/SHIPNAME/SPEED/COURSE.' },
-        { key: 'vesseltracker', name: 'VesselTracker Public Feed',        url: 'vesseltracker.com',                       desc: 'VesselTracker.com public JSONP endpoint — North Sea, Black Sea, Panama Canal.' },
+        { key: 'aisstream',   name: 'AISStream WebSocket (PRIMARY)',    url: 'aisstream.io',           desc: 'Real-time AIS WebSocket — global bbox, PositionReport+ShipStaticData. Requires non-null origin (GitHub Pages ✓, file:// ✗).' },
+        { key: 'aishub',      name: 'AISHub HTTP (6 regions)',          url: 'data.aishub.net',        desc: 'Chokepoint regions via CORS proxy. English Channel, Baltic, Red Sea, Hormuz, Malacca, Gibraltar.' },
+        { key: 'digitraffic', name: 'Digitraffic Finland',              url: 'meri.digitraffic.fi',    desc: 'Finnish Transport Agency AIS — Baltic Sea. Direct fetch (CORS-enabled).' },
+        { key: 'noaa_marine', name: 'NOAA Marine AIS',                  url: 'coast.noaa.gov',         desc: 'US Coast Guard AIS — US coastal waters via CORS proxy.' },
+        { key: 'mt_global',   name: 'MarineTraffic Tile JSON (Global)', url: 'tiles.marinetraffic.com', desc: 'Public tile endpoint — LAT/LON/SHIPNAME/SPEED/COURSE. Global bbox via CORS proxy.' },
+        { key: 'mt_bbox',     name: 'MarineTraffic Map JSON (Regions)', url: 'marinetraffic.com',      desc: 'Undocumented map API — Mediterranean, Indian Ocean, SE Asia. Via CORS proxy.' },
+        { key: 'mt_tiles',    name: 'MarineTraffic Tiles (5 regions)',  url: 'marinetraffic.com',      desc: 'Europe, Indian Ocean, SE Asia, W Atlantic, E Asia. Via CORS proxy.' },
+        { key: 'vesselfinder',name: 'VesselFinder Map API',             url: 'vesselfinder.com',       desc: 'Public map API — chokepoint bounding boxes. Array format [mmsi,lat,lng,hdg,spd,name].' },
+        { key: 'vesseltracker',name: 'VesselTracker JSONP Feed',        url: 'vesseltracker.com',      desc: 'Public JS endpoint — North Sea, Black Sea, Panama Canal. Via CORS proxy.' },
       ]
     },
     {
@@ -5302,7 +5287,6 @@ function reportPanel() {
   const liveFeeds = Object.values(FEED_STATUS).filter(f=>f.status==='live').length;
   const totalFeeds= Object.keys(FEED_STATUS).length;
   const noData    = crit.length===0 && high.length===0 && topConf.length===0 && topCyber.length===0;
-  // Aliases used in template
   const topConflicts  = topConf;
   const milFlights    = milFl;
   const alertMarkets  = alertMkts;
@@ -5965,10 +5949,10 @@ const FEED_STATUS = {
   aisstream:    { name:'aisstream.io (AIS WS)',   url:'aisstream.io',                status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
   noaa_marine:  { name:'NOAA Marine AIS',         url:'coast.noaa.gov',              status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
   digitraffic:  { name:'Digitraffic Finland',     url:'meri.digitraffic.fi',         status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
-  vesselfinder: { name:'VesselFinder',            url:'vesselfinder.com',            status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
+  mt_global:    { name:'MarineTraffic Global',    url:'tiles.marinetraffic.com',     status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
   mt_bbox:      { name:'MarineTraffic Bbox',      url:'marinetraffic.com',           status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
   mt_tiles:     { name:'MarineTraffic Tiles',     url:'marinetraffic.com',           status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
-  mt_global:    { name:'MarineTraffic Global',    url:'tiles.marinetraffic.com',     status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
+  vesselfinder: { name:'VesselFinder',            url:'vesselfinder.com',            status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
   vesseltracker:{ name:'VesselTracker',           url:'vesseltracker.com',           status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Maritime' },
   adsbx:        { name:'ADSB Exchange',           url:'adsbexchange.com',            status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Flights' },
   cisa_kev:     { name:'CISA KEV (Exploits)',     url:'cisa.gov',                    status:'pending', count:0, latency:0, error:'', lastUpdate:null, category:'Cyber' },
@@ -6722,41 +6706,32 @@ function connectAISStream() {
       // Must send subscription within 3 seconds of connect
       // Use targeted high-traffic regions — global bbox sends 300 msg/s
       // which overloads the browser connection queue and gets killed
+      // AISStream subscription — max 5 bounding boxes allowed
+      // Format: [[min_lat, min_lng], [max_lat, max_lng]] per bbox
+      // Try global first (simplest), then targeted if that gets rejected
       const subscription = {
-        APIKey: API_KEY,
+        APIKey: API_KEY,   // correct casing per official docs
         BoundingBoxes: [
-          // Major chokepoints + shipping lanes — high vessel density
-          [[9,  42], [18,  51]],   // Red Sea / Bab-el-Mandeb
-          [[23, 54], [28,  60]],   // Strait of Hormuz
-          [[0,  99], [6,  108]],   // Strait of Malacca
-          [[22,117], [26, 123]],   // Taiwan Strait
-          [[49,  -2],[52,    5]],  // English Channel
-          [[39,  27],[47,   42]],  // Black Sea / Bosphorus
-          [[5,  108],[20,  125]],  // South China Sea
-          [[34,  -8],[37,   -1]],  // Gibraltar
-          [[7,  -83],[11,  -76]],  // Panama Canal
-          [[-36, 16],[-30,  22]],  // Cape of Good Hope
-          [[30,  -8],[47,   38]],  // Mediterranean
-          [[53,  10],[66,   32]],  // Baltic / North Sea
-          [[18,  55],[28,   65]],  // Arabian Sea
-          [[8,   78],[24,  100]],  // Bay of Bengal
-          [[28, 118],[46,  148]],  // North Pacific West
-          [[38, -72],[56,  -28]],  // North Atlantic
+          [[-90, -180], [90, 180]]  // Global — simplest, most reliable
         ],
-        FilterMessageTypes: ['PositionReport'],
+        FilterMessageTypes: ['PositionReport', 'ShipStaticData'],
       };
-      aisWS.send(JSON.stringify(subscription));
+      const subJson = JSON.stringify(subscription);
+      console.info('[AISStream] Sending subscription:', subJson);
+      aisWS.send(subJson);
       aisWSActive = true;
-      setFeedStatus('aisstream', 'live', 0, '', Date.now()-t0);
-      console.info('[AISStream] Subscribed to 16 high-traffic regions');
+      setFeedStatus('aisstream', 'live', 0, 'Subscribed — awaiting vessels', Date.now()-t0);
+      console.info('[AISStream] Subscription sent — waiting for PositionReport messages...');
     };
 
+    let _aisRawCount = 0;
     aisWS.onmessage = (msg) => {
       try {
+        _aisRawCount++;
+        // Log raw first 10 messages — critical for debugging
+        if (_aisRawCount <= 10) console.info('[AISStream] RAW msg #'+_aisRawCount+':', msg.data.slice(0, 150));
         const data = JSON.parse(msg.data);
-        // Log first few messages to confirm stream is flowing
         const aisCount = vessels.filter(v=>v.aisStream).length;
-        if (aisCount < 3) console.info('[AISStream] Message received:', data.MessageType || JSON.stringify(msg.data).slice(0,120));
         // Update name from ShipStaticData
         if (data.MessageType === 'ShipStaticData' && data.Message?.ShipStaticData) {
           const sd = data.Message.ShipStaticData;
@@ -9788,16 +9763,12 @@ let _tlPlaying = false;
 function getTlItems() {
   const items = [];
   const now = Date.now();
-  const DAY = 86400000;
-
   CONFLICTS.forEach((c, i) => {
-    // Use c.age (hours) if available, else spread evenly across last 90 days
     const ageH = c.age || ((i % 90) * 24 + (i * 7) % 24);
     const t = now - ageH * 3600000;
     const rgb = c.sev==='Critical'?'244,63,94':c.sev==='High'?'251,146,60':'251,191,36';
     const hex = c.sev==='Critical'?'#f43f5e':c.sev==='High'?'#fb923c':'#fbbf24';
-    const d = new Date(t);
-    const ds = d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+    const ds = new Date(t).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
     items.push({ id:'c_'+c.id, t, group:0,
       label: (c.region||c.country||'Unknown').split('/')[0].trim().slice(0,20),
       rgb, hex,
@@ -9805,15 +9776,13 @@ function getTlItems() {
       sev: c.sev || 'Medium'
     });
   });
-
   CYBER.forEach((c, i) => {
     const ageH = c.age || ((i % 60) * 24 + (i * 11) % 24);
     const t = now - ageH * 3600000;
     const rgb = c.cvss>=9?'244,63,94':c.cvss>=7?'251,146,60':'0,229,255';
     const hex = c.cvss>=9?'#f43f5e':c.cvss>=7?'#fb923c':'#00e5ff';
-    const d = new Date(t);
-    const ds = d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
     const sev = c.cvss>=9?'Critical':c.cvss>=7?'High':'Medium';
+    const ds = new Date(t).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
     items.push({ id:'y_'+c.id, t, group:1,
       label: c.cve || 'CVE-Unknown',
       rgb, hex,
@@ -9821,12 +9790,9 @@ function getTlItems() {
       sev
     });
   });
-
   NEWS.slice(0, 30).forEach((n, i) => {
-    const ageMins = n.age || (i * 45);
-    const t = now - ageMins * 60000;
-    const d = new Date(t);
-    const ds = d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    const t = now - (n.age||i*45) * 60000;
+    const ds = new Date(t).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' '+new Date(t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     items.push({ id:'n_'+n.id, t, group:2,
       label: (n.src||'NEWS').slice(0, 14),
       rgb:'0,255,179', hex:'#00ffb3',
@@ -9834,7 +9800,6 @@ function getTlItems() {
       sev: 'Info'
     });
   });
-
   return items;
 }
 
@@ -9843,10 +9808,10 @@ const TL_GROUPS = [
   { label:'CYBER',    hex:'#00e5ff' },
   { label:'NEWS',     hex:'#00ffb3' },
 ];
-const TL_LEFT   = 76;  // group label column width
-const TL_ROW_H  = 64;  // px per group row — tall enough for 3 lanes
-const TL_HDR_H  = 34;  // axis header height — more room for date labels
-const TL_PAD    = 4;   // top padding
+const TL_LEFT   = 76;
+const TL_ROW_H  = 64;
+const TL_HDR_H  = 34;
+const TL_PAD    = 4;
 
 function renderTimeline() {
   const svg = document.getElementById('tl-svg');
@@ -9889,7 +9854,6 @@ function renderTimeline() {
   // Left label column separator
   out += `<line x1="${TL_LEFT}" y1="${TL_HDR_H}" x2="${TL_LEFT}" y2="${H}" stroke="rgba(0,229,255,.12)" stroke-width="1"/>`;
 
-  // Time axis ticks
   const tickLabels = [];
   const tickCount = Math.min(10, Math.floor(cW / 90));
   const tickStepMs = visMs / tickCount;
@@ -9903,22 +9867,19 @@ function renderTimeline() {
       ? d.toLocaleDateString('en-GB',{day:'numeric',month:'short'})
       : d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+(visMs<86400000?'':' '+d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}));
     out += `<line x1="${x}" y1="${TL_HDR_H}" x2="${x}" y2="${H}" stroke="rgba(0,229,255,.07)" stroke-width="1"/>`;
-    // Date label rendered INSIDE header bar (drawn after, so appears on top)
-    // Stored for second pass
     tickLabels.push({ x, label });
   }
 
-  // NOW line — stored for rendering after items (so it's always on top)
   const nowX = xOf(now);
 
-  // Axis header bar — drawn AFTER grid lines so labels are on top
+  // Axis header bar — drawn over grid lines
   out += `<rect x="0" y="0" width="${W}" height="${TL_HDR_H}" fill="rgba(1,8,24,.92)"/>`;
   out += `<line x1="0" y1="${TL_HDR_H}" x2="${W}" y2="${TL_HDR_H}" stroke="rgba(0,229,255,.2)" stroke-width="1"/>`;
-  // Date/time tick labels ON TOP of header bar
+  // Tick labels rendered ON TOP of header
   tickLabels.forEach(({ x, label }) => {
     if (x < TL_LEFT + 2 || x > W - 2) return;
-    out += `<text x="${x}" y="${TL_HDR_H - 9}" font-family="monospace" font-size="10" fill="rgba(0,229,255,.75)" text-anchor="middle" font-weight="600">${label}</text>`;
-    out += `<line x1="${x}" y1="${TL_HDR_H - 4}" x2="${x}" y2="${TL_HDR_H}" stroke="rgba(0,229,255,.4)" stroke-width="1"/>`;
+    out += `<line x1="${x}" y1="${TL_HDR_H-5}" x2="${x}" y2="${TL_HDR_H}" stroke="rgba(0,229,255,.45)" stroke-width="1"/>`;
+    out += `<text x="${x}" y="${TL_HDR_H-8}" font-family="monospace" font-size="10" fill="rgba(0,229,255,.85)" text-anchor="middle" font-weight="600">${label}</text>`;
   });
 
   // Items — render each group row, stacking overlapping items vertically within the row
@@ -9945,36 +9906,24 @@ function renderTimeline() {
       if (lane >= maxLanes) lane = maxLanes - 1;
       const iy = rowMid - (laneH / 2) + (lane - Math.floor(maxLanes/2)) * laneSpacing;
       laneRight[lane] = x + textW + 3;
-
-      const d = new Date(it.t);
-      const dtStr = d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
       const safeId = it.id.replace(/'/g, '');
-
-      // Click target rect (invisible, full size for easy clicking)
-      out += `<rect x="${x-2}" y="${iy-2}" width="${textW+4}" height="${laneH+4}" rx="4"
-        fill="transparent" style="cursor:pointer"
-        onclick="tlSelectItem('${safeId}')"/>`;
-      // Pill background
-      out += `<rect x="${x}" y="${iy}" width="${textW}" height="${laneH}" rx="3"
-        fill="rgba(${it.rgb},.13)" stroke="rgba(${it.rgb},.6)" stroke-width="1"
-        style="pointer-events:none"/>`;
+      // Invisible oversized click target
+      out += `<rect x="${x-2}" y="${iy-3}" width="${textW+4}" height="${laneH+6}" rx="4" fill="transparent" style="cursor:pointer" onclick="tlSelectItem('${safeId}')"/>`;
+      // Pill
+      out += `<rect x="${x}" y="${iy}" width="${textW}" height="${laneH}" rx="3" fill="rgba(${it.rgb},.13)" stroke="rgba(${it.rgb},.65)" stroke-width="1" style="pointer-events:none"/>`;
       // Left accent bar
-      out += `<rect x="${x}" y="${iy}" width="3" height="${laneH}" rx="1.5"
-        fill="rgba(${it.rgb},.9)" style="pointer-events:none"/>`;
-      // Label text (clipped to fit pill)
+      out += `<rect x="${x}" y="${iy}" width="3" height="${laneH}" rx="1.5" fill="rgba(${it.rgb},.95)" style="pointer-events:none"/>`;
+      // Label
       const maxChars = Math.max(4, Math.floor((textW - 14) / 6.5));
-      out += `<text x="${x+8}" y="${iy+13}" font-family="monospace" font-size="10.5" fill="${it.hex}"
-        style="pointer-events:none" font-weight="700" letter-spacing="0.2">${it.label.slice(0, maxChars)}</text>`;
-      // Vertical stem line
-      out += `<line x1="${x+1.5}" y1="${iy+laneH}" x2="${x+1.5}" y2="${rowY+TL_ROW_H}" stroke="rgba(${it.rgb},.2)" stroke-width="1" stroke-dasharray="2,2" style="pointer-events:none"/>`;
+      out += `<text x="${x+8}" y="${iy+13}" font-family="monospace" font-size="10.5" fill="${it.hex}" style="pointer-events:none" font-weight="700" letter-spacing="0.2">${it.label.slice(0, maxChars)}</text>`;
     });
   });
 
-  // NOW line on top of everything
+  // NOW line — drawn last so always on top
   if (nowX > TL_LEFT && nowX < W) {
-    out += `<line x1="${nowX}" y1="${TL_HDR_H}" x2="${nowX}" y2="${H}" stroke="rgba(0,229,255,.85)" stroke-width="2" stroke-dasharray="5,3"/>`;
-    out += `<rect x="${nowX-12}" y="${TL_HDR_H+2}" width="24" height="14" rx="3" fill="rgba(0,229,255,.2)" stroke="rgba(0,229,255,.5)" stroke-width="1"/>`;
-    out += `<text x="${nowX}" y="${TL_HDR_H+12}" font-family="monospace" font-size="8" fill="rgba(0,229,255,.95)" text-anchor="middle" font-weight="700">NOW</text>`;
+    out += `<line x1="${nowX}" y1="${TL_HDR_H}" x2="${nowX}" y2="${H}" stroke="rgba(0,229,255,.9)" stroke-width="2" stroke-dasharray="5,3"/>`;
+    out += `<rect x="${nowX-13}" y="${TL_HDR_H+2}" width="26" height="14" rx="3" fill="rgba(0,229,255,.18)" stroke="rgba(0,229,255,.5)" stroke-width="1"/>`;
+    out += `<text x="${nowX}" y="${TL_HDR_H+12}" font-family="monospace" font-size="8" fill="#00e5ff" text-anchor="middle" font-weight="700">NOW</text>`;
   }
 
   // Empty state
@@ -9990,7 +9939,6 @@ function renderTimeline() {
   if (container) container.innerHTML = out;
 }
 
-// Store item lookup for click handler — must be on window for SVG inline onclick
 function tlSelectItem(id) {
   const items = getTlItems();
   const it = items.find(i => i.id === id);
@@ -10001,28 +9949,21 @@ function tlSelectItem(id) {
   const metaEl  = document.getElementById('tl-det-meta');
   const badgeEl = document.getElementById('tl-det-badge');
   if (!strip) return;
-  if (dotEl)   { dotEl.style.background = it.hex; dotEl.style.boxShadow = '0 0 6px '+it.hex; }
+  if (dotEl) { dotEl.style.background = it.hex; dotEl.style.boxShadow = '0 0 6px '+it.hex; }
   if (titleEl) titleEl.textContent = it.label;
-  // Build rich detail HTML
   const sevColors = { Critical:'#f43f5e', High:'#fb923c', Medium:'#fbbf24', Info:'#00ffb3' };
   const sevBg = { Critical:'rgba(244,63,94,.15)', High:'rgba(251,146,60,.12)', Medium:'rgba(251,191,36,.1)', Info:'rgba(0,255,179,.08)' };
   const sev = it.sev || 'Info';
   if (badgeEl) {
     badgeEl.textContent = sev.toUpperCase();
-    badgeEl.style.background = sevBg[sev] || sevBg.Info;
-    badgeEl.style.color = sevColors[sev] || '#00ffb3';
-    badgeEl.style.border = '1px solid '+(sevColors[sev]||'#00ffb3')+'44';
+    badgeEl.style.cssText = `font-size:10px;padding:2px 8px;border-radius:3px;flex-shrink:0;font-family:var(--mono);font-weight:700;letter-spacing:.5px;background:${sevBg[sev]||sevBg.Info};color:${sevColors[sev]||'#00ffb3'};border:1px solid ${sevColors[sev]||'#00ffb3'}44`;
   }
-  // Format detail as rows
   const parts = it.detail.split(' · ').filter(Boolean);
-  const rows = parts.map(p => `<div style="padding:2px 0;border-bottom:1px solid rgba(0,229,255,.06);color:rgba(190,215,255,.8)">${p}</div>`).join('');
   const d = new Date(it.t);
-  const timeStr = d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' UTC';
-  if (metaEl) metaEl.innerHTML = `
-    <div style="color:rgba(0,229,255,.5);font-size:10px;margin-bottom:6px;letter-spacing:.5px">🕐 ${timeStr}</div>
-    ${rows}`;
-  strip.style.display = 'flex';
-  strip.style.flexDirection = 'column';
+  const timeStr = d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short',year:'numeric'})+' · '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' UTC';
+  const rows = parts.map(p => `<span style="display:inline-block;margin-right:12px;color:rgba(190,215,255,.85)">${p}</span>`).join('');
+  if (metaEl) metaEl.innerHTML = `<div style="color:rgba(0,229,255,.55);font-size:10px;margin-bottom:5px;letter-spacing:.3px">🕐 ${timeStr}</div><div style="line-height:1.8">${rows}</div>`;
+  strip.style.display = 'block';
 }
 window.tlSelectItem = tlSelectItem;
 
